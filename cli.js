@@ -324,7 +324,7 @@ async function processMessage(userMessage, messages, rl) {
                 body: JSON.stringify({
                     model: 'codellama',
                     messages: messages,
-                    stream: false,
+                    stream: true,
                 }),
             });
 
@@ -332,13 +332,46 @@ async function processMessage(userMessage, messages, rl) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const data = await response.json();
-            const aiResponseContent = data.message.content;
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let aiResponseContent = '';
+            let buffer = ''; // Buffer to handle incomplete JSON objects
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+
+                // Process each complete JSON object in the buffer
+                let newlineIndex;
+                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.substring(0, newlineIndex).trim();
+                    buffer = buffer.substring(newlineIndex + 1);
+
+                    if (line) {
+                        try {
+                            const json = JSON.parse(line);
+                            if (json.done === false) {
+                                aiResponseContent += json.message.content;
+                                process.stdout.write(json.message.content); // Print as it streams
+                            } else if (json.done === true) {
+                                // Final message, potentially contains tool calls or final answer
+                                // We'll handle this after the loop
+                            }
+                        } catch (e) {
+                            console.error('Error parsing JSON from stream:', e);
+                            // This might happen if a chunk is not a complete JSON line
+                        }
+                    }
+                }
+            }
+            process.stdout.write('\n'); // New line after streaming output
 
             const planMatch = aiResponseContent.match(/<plan>([\s\S]*?)<\/plan>/);
             const cleanedAiResponseContent = aiResponseContent.replace(/<plan>[\s\S]*?<\/plan>/g, '').trim();
 
-            console.log(`AI: ${cleanedAiResponseContent}`);
+            
             messages.push({ role: 'assistant', content: aiResponseContent });
             interactionLog.ai_responses.push(aiResponseContent);
 
