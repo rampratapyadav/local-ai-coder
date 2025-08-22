@@ -346,7 +346,7 @@ async function processMessage(userMessage, messages, rl) {
                 const planJson = planMatch[1].trim();
                 try {
                     const plan = JSON.parse(planJson);
-                    if (validatePlan(plan)) { // Add validation here
+                    if (validatePlan(plan)) {
                         console.log(`
 --- AI's Plan ---
 ${JSON.stringify(plan, null, 2)}
@@ -422,7 +422,9 @@ ${JSON.stringify(plan, null, 2)}
                                     }
 
                                     const outputMessage = result.success ? `<tool_output>${result.output}</tool_output>` : `<tool_output_error>${result.error}</tool_output_error>`;
-                                    console.log(`--- Tool Output --- ${result.output || result.error}-------------------`);
+                                    console.log(`--- Tool Output ---
+${result.output || result.error}
+-------------------`);
                                     messages.push({ role: 'tool', content: outputMessage });
                                     interactionLog.tool_executions.push({ tool_call: `${tool}(${resolvedArgs.join(', ')})`, tool_output: outputMessage });
 
@@ -493,7 +495,9 @@ ${JSON.stringify(plan, null, 2)}
                             }
 
                             const outputMessage = result.success ? `<tool_output>${result.output}<\/tool_output>` : `<tool_output_error>${result.error}<\/tool_output_error>`;
-                            console.log(`--- Tool Output ---\n${result.output || result.error}\n-------------------`);
+                            console.log(`--- Tool Output ---
+${result.output || result.error}
+-------------------`);
                             messages.push({ role: 'tool', content: outputMessage });
                             interactionLog.tool_executions.push({ tool_call: toolCall, tool_output: outputMessage });
                         } else {
@@ -516,185 +520,7 @@ ${JSON.stringify(plan, null, 2)}
     return interactionLog;
 }
 
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-
-            const data = await response.json();
-            const aiResponseContent = data.message.content;
-
-            const planMatch = aiResponseContent.match(/<plan>([\s\S]*?)<\/plan>/);
-            const cleanedAiResponseContent = aiResponseContent.replace(/<plan>[\s\S]*?<\/plan>/g, '').trim();
-
-            console.log(`AI: ${cleanedAiResponseContent}`);
-            messages.push({ role: 'assistant', content: aiResponseContent });
-            interactionLog.ai_responses.push(aiResponseContent);
-
-            if (planMatch) {
-                const planJson = planMatch[1].trim();
-                try {
-                    const plan = JSON.parse(planJson);
-                    if (plan && plan.plan && Array.isArray(plan.plan)) {
-                        console.log(`\n--- AI's Plan ---\n${JSON.stringify(plan, null, 2)}\n-------------------`);
-                        for (let i = 0; i < plan.plan.length; i++) {
-                            const step = plan.plan[i];
-                            console.log(`\n--- Executing Step ${step.step}: ${step.description} ---`);
-
-                            let itemsToIterate = [];
-                            if (step.iterate_on) {
-                                const iterable = context[step.iterate_on];
-                                if (Array.isArray(iterable)) {
-                                    itemsToIterate = iterable;
-                                } else if (typeof iterable === 'string') {
-                                    itemsToIterate = iterable.split('\n').filter(f => f.length > 0);
-                                }
-                            } else {
-                                itemsToIterate = [null]; // Execute once if not iterating
-                            }
-
-                            let stepOutput = [];
-                            for (const item of itemsToIterate) {
-                                if (step.tool) {
-                                    const { tool, args } = step;
-                                    let resolvedArgs = args.map(arg => {
-                                        // Resolve placeholders like ${variable_name} or ${item}
-                                        if (typeof arg === 'string') {
-                                            if (arg === '${item}') {
-                                                return item;
-                                            }
-                                            const varMatch = arg.match(/^\$\{(.*)\}$/);
-                                            if (varMatch) {
-                                                const varName = varMatch[1];
-                                                return context[varName] || arg;
-                                            }
-                                        }
-                                        return arg;
-                                    });
-
-                                    let result;
-                                    if (tool === 'list_directory' && resolvedArgs.length > 1) { // If filter is provided
-                                        result = await listDirectoryTool(resolvedArgs[0], resolvedArgs[1]);
-                                    } else {
-                                        switch (tool) {
-                                            case 'read_file':
-                                                result = await readFileTool(resolvedArgs[0]);
-                                                break;
-                                            case 'write_file':
-                                                result = await writeFileTool(resolvedArgs[0], resolvedArgs[1], rl);
-                                                break;
-                                            case 'list_directory':
-                                                result = await listDirectoryTool(resolvedArgs[0]);
-                                                break;
-                                            case 'run_shell_command':
-                                                result = await runShellCommandTool(resolvedArgs[0], rl);
-                                                break;
-                                            case 'search_file_content':
-                                                result = await searchFileContentTool(resolvedArgs[0], resolvedArgs[1]);
-                                                break;
-                                            case 'create_directory':
-                                                result = await createDirectoryTool(resolvedArgs[0]);
-                                                break;
-                                            case 'replace_in_file':
-                                            result = await replaceInFileTool(resolvedArgs[0], resolvedArgs[1], resolvedArgs[2], rl);
-                                            break;
-                                        case 'get_project_context':
-                                            result = await getProjectContextTool();
-                                            break;
-                                        default:
-                                                result = { success: false, error: `Unknown tool: ${tool}` };
-                                        }
-                                    }
-
-                                    const outputMessage = result.success ? `<tool_output>${result.output}<\/tool_output>` : `<tool_output_error>${result.error}<\/tool_output_error>`;
-                                    console.log(`--- Tool Output ---\n${result.output || result.error}\n-------------------`);
-                                    messages.push({ role: 'tool', content: outputMessage });
-                                    interactionLog.tool_executions.push({ tool_call: `${tool}(${resolvedArgs.join(', ')})`, tool_output: outputMessage });
-
-                                    if (result.success) {
-                                        stepOutput.push(result.output);
-                                    }
-                                } else {
-                                    // If no tool, but input_variable is present, use it as output
-                                    if (step.input_variable && context[step.input_variable]) {
-                                        stepOutput.push(context[step.input_variable]);
-                                    }
-                                }
-                            }
-
-                            if (step.output_variable && stepOutput.length > 0) {
-                                context[step.output_variable] = stepOutput.length === 1 ? stepOutput[0] : stepOutput;
-                            }
-                        }
-                    }
-                } catch (error) {
-                    console.error(`Error parsing or executing plan: ${error.message}`);
-                }
-            } else {
-                const toolCodeMatches = aiResponseContent.matchAll(/<tool_code>([\s\S]*?)<\/tool_code>/g);
-                let toolCalls = Array.from(toolCodeMatches).map(match => match[1].trim());
-
-                if (toolCalls.length > 0) {
-                    for (const toolCallWithComments of toolCalls) {
-                        const toolCall = toolCallWithComments.replace(/\/\/.*\n/g, '').trim();
-                        const parsedTool = parseToolCall(toolCall);
-
-                        if (parsedTool) {
-                            const { toolName, args } = parsedTool;
-                            console.log(`\n--- Executing Tool: ${toolName} with args: ${args.join(', ')} ---`);
-                            let result;
-
-                            switch (toolName) {
-                                case 'read_file':
-                                    result = await readFileTool(args[0]);
-                                    break;
-                                case 'write_file':
-                                    result = await writeFileTool(args[0], args[1], rl);
-                                    break;
-                                case 'list_directory':
-                                    result = await listDirectoryTool(args[0]);
-                                    break;
-                                case 'run_shell_command':
-                                    result = await runShellCommandTool(args[0], rl);
-                                    break;
-                                case 'search_file_content':
-                                    result = await searchFileContentTool(args[0], args[1]);
-                                    break;
-                                case 'create_directory':
-                                    result = await createDirectoryTool(args[0]);
-                                    break;
-                                case 'replace_in_file':
-                                    result = await replaceInFileTool(args[0], args[1], args[2], rl);
-                                    break;
-                                case 'get_project_context':
-                                    result = await getProjectContextTool();
-                                    break;
-                                default:
-                                    result = { success: false, error: `Unknown tool: ${toolName}` };
-                            }
-
-                            const outputMessage = result.success ? `<tool_output>${result.output}<\/tool_output>` : `<tool_output_error>${result.error}<\/tool_output_error>`;
-                            console.log(`--- Tool Output ---\n${result.output || result.error}\n-------------------`);
-                            messages.push({ role: 'tool', content: outputMessage });
-                            interactionLog.tool_executions.push({ tool_call: toolCall, tool_output: outputMessage });
-                        } else {
-                            const outputMessage = `<tool_output_error>Unknown tool call: ${toolCall}<\/tool_output_error>`;
-                            console.log(`--- Tool Output ---\nUnknown tool call: ${toolCall}\n-------------------`);
-                            messages.push({ role: 'tool', content: outputMessage });
-                            interactionLog.tool_executions.push({ tool_call: toolCall, tool_output: outputMessage });
-                        }
-                    }
-                } else {
-                    finalAnswer = true; // No tool calls, so AI is done or asking for clarification
-                }
-            }
-        } catch (error) {
-            console.error(`\nError in AI interaction loop: ${error.message}`);
-            console.error('Please ensure Ollama is running and the \'codellama\' model is available.');
-            finalAnswer = true; // Exit loop on error
-        }
-    }
-    return interactionLog;
-}
+            
 
 async function chatWithAI(initialPrompt = null) {
     let messages = await loadHistory(); // Load history at the start
