@@ -461,12 +461,12 @@ function validatePlan(plan) {
 	return true;
 }
 
-async function handleToolError(failedStep, error, context, messages, rl, contextManager, currentPlan, currentStepIndex) {
+async function handleToolError(failedStep, error, context, messages, rl, contextManager, planState) {
 	console.error(`\n--- Tool Error: Step ${failedStep.step} failed ---`);
 	console.error(`Error: ${error}`);
 
 	// Construct a new prompt for the AI to ask for a new plan
-	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nThe current plan was:\n${JSON.stringify(currentPlan, null, 2)}\n\nThe current step index was: ${currentStepIndex}\n\nPlease provide a new plan to achieve the original goal, taking this error into account. If you provide a new plan, include it in a <plan> block and specify a "newStepIndex" if you want to restart from a specific step (default is 0).\n`;
+	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nThe current plan was:\n${JSON.stringify(planState.currentPlan, null, 2)}\n\nThe current step index was: ${planState.currentStepIndex}\n\nPlease provide a new plan to achieve the original goal, taking this error into account. If you provide a new plan, include it in a <plan> block and specify a "newStepIndex" if you want to restart from a specific step (default is 0).\n`;
 
 	// Send the new prompt to the AI and get a new plan
 	const interactionLog = await processMessage(newPrompt, messages, rl, contextManager);
@@ -486,7 +486,7 @@ async function handleToolError(failedStep, error, context, messages, rl, context
 	return null; // No new plan provided
 }
 
-async function processMessage(userMessage, messages, rl, contextManager) {
+async function processMessage(userMessage, messages, rl, contextManager, planState) {
 	if (userMessage && !userMessage.includes('The following step in the plan failed')) {
 		messages.push({ role: 'user', content: userMessage });
 	} else if (userMessage) {
@@ -500,8 +500,6 @@ async function processMessage(userMessage, messages, rl, contextManager) {
 		tool_executions: [],
 	};
 	let context = contextManager.context; // Get context from the manager
-	let currentPlan = null; // To store the currently executing plan
-	let currentStepIndex = 0; // To track the current step in the plan
 
 	while (!finalAnswer) {
 		try {
@@ -597,9 +595,10 @@ async function processMessage(userMessage, messages, rl, contextManager) {
 					}
 
 					if (validatePlan(currentPlan)) {
-						console.log(`\n--- AI\'s Plan ---` + "\n" + `${JSON.stringify(currentPlan, null, 2)}\n-------------------`);
-						while (currentStepIndex < currentPlan.plan.length) {
-							const step = currentPlan.plan[currentStepIndex];
+                        planState.isPlanExecuting = true; // Set flag when plan starts
+                        console.log(`\n--- AI\'s Plan ---\n` + "\n" + `${JSON.stringify(currentPlan, null, 2)}\n-------------------`);
+                        while (planState.currentStepIndex < planState.currentPlan.plan.length) {
+                            const step = planState.currentPlan.plan[planState.currentStepIndex];
 							console.log(`\n--- Executing Step ${step.step}: ${step.description} ---`);
 
 							let itemsToIterate = [];
@@ -714,7 +713,7 @@ async function processMessage(userMessage, messages, rl, contextManager) {
 								} 
 								} catch (error) {
                                     // Pass currentPlan and currentStepIndex to handleToolError
-                                    const newPlanResult = await handleToolError(step, error.message, context, messages, rl, contextManager, currentPlan, currentStepIndex);
+                                    const newPlanResult = await handleToolError(step, error.message, context, messages, rl, contextManager, planState);
                                     if (newPlanResult && newPlanResult.newPlan) {
                                         currentPlan = newPlanResult.newPlan;
                                         currentStepIndex = newPlanResult.newStepIndex || 0; // AI can suggest where to restart
@@ -729,12 +728,13 @@ async function processMessage(userMessage, messages, rl, contextManager) {
                                 context[step.output_variable] =
                                     stepOutput.length === 1 ? stepOutput[0] : stepOutput;
                             }
-                            currentStepIndex++; // Move to the next step
+                            planState.currentStepIndex++; // Move to the next step
                         }
-                    } else {
-                        console.error(
-                            'Invalid plan received from AI. Skipping plan execution.'
-                        );
+						planState.					planState.isPlanExecuting = false; // Reset flag when plan finishes
+					} else {
+						console.error(
+							'Invalid plan received from AI. Skipping plan execution.'
+						);
                         // Optionally, send a message back to the AI about the invalid plan
                         messages.push({
                             role: 'tool',
@@ -868,6 +868,12 @@ async function chatWithAI(initialPrompt = null) {
 
 	let messages = await loadHistory(); // Load history at the start
 
+	let planState = {
+		currentPlan: null, // To store the currently executing plan
+		currentStepIndex: 0, // To track the current step in the plan
+		isPlanExecuting: false, // Flag to indicate if a plan is currently being executed
+	};
+
 	// --- Project Context Awareness: Automatically inject project overview ---
 	const projectRoot = process.cwd();
 	let projectOverview = 'Project Overview:\n';
@@ -940,7 +946,7 @@ async function chatWithAI(initialPrompt = null) {
 		console.log(
 			`\n--- Local AI Coder (Agent Mode) ---\nUser: ${initialPrompt}\n`
 		);
-		const interactionLog = await processMessage(initialPrompt, messages, rl, contextManager);
+		const interactionLog = await processMessage(initialPrompt, messages, rl, contextManager, planState);
 		await logInteraction(interactionLog);
 		await saveHistory(messages);
 		rl.close();
@@ -962,7 +968,65 @@ async function chatWithAI(initialPrompt = null) {
 			return;
 		}
 
-		const interactionLog = await processMessage(userMessage, messages, rl, contextManager);
+		// Handle special commands for plan modification/cancellation
+		if (userMessage.toLowerCase() === '/cancel_plan') {
+			if (planState.currentPlan) {
+				planState.currentPlan = null;
+				planState.currentStepIndex = 0;
+				planState.isPlanExecuting = false;
+				console.log('Current plan cancelled.');
+				messages.push({ role: 'user', content: 'User cancelled the current plan.' });
+			} else {
+				console.log('No active plan to cancel.');
+			}
+			rl.prompt();
+			return;
+		}
+
+		if (userMessage.toLowerCase() === '/modify_plan') {
+			if (planState.currentPlan) {
+				console.log('\n--- Current Plan ---');
+				console.log(JSON.stringify(planState.currentPlan, null, 2));
+				console.log('--------------------');
+				console.log('Please provide the full new plan in JSON format.');
+				console.log('Type your new plan, then press Enter twice to submit (empty line).');
+
+				let newPlanJson = '';
+				rl.question('', (input) => { // Start reading multiline input
+					newPlanJson += input;
+					rl.on('line', function collectInput(newLine) {
+						if (newLine.trim() === '') {
+							rl.off('line', collectInput); // Stop collecting input
+							try {
+								const newPlan = JSON.parse(newPlanJson);
+								if (validatePlan(newPlan)) {
+									planState.currentPlan = newPlan;
+									planState.currentStepIndex = newPlan.newStepIndex || 0;
+									planState.isPlanExecuting = true; // Assume plan will resume
+									console.log('Plan updated. Resuming execution.');
+									messages.push({ role: 'user', content: 'User modified the plan. Proceeding with the new plan.' });
+								} else {
+									console.error('Invalid new plan provided. Plan not updated.');
+									messages.push({ role: 'user', content: 'User attempted to modify the plan with an invalid plan. Please provide a valid JSON plan.' });
+								}
+							} catch (e) {
+								console.error('Error parsing new plan JSON:', e);
+								messages.push({ role: 'user', content: 'User attempted to modify the plan with invalid JSON. Please provide a valid JSON plan.' });
+							}
+							rl.prompt();
+						} else {
+							newPlanJson += '\n' + newLine;
+						}
+					});
+				});
+			} else {
+				console.log('No active plan to modify.');
+				rl.prompt();
+			}
+			return;
+		}
+
+		const interactionLog = await processMessage(userMessage, messages, rl, contextManager, planState);
 		await logInteraction(interactionLog);
 		rl.prompt(); // Re-display the prompt after AI response
 	});
