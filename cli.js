@@ -180,10 +180,7 @@ async function searchFileContentTool(filePath, pattern) {
 
 async function createDirectoryTool(dirPath) {
 	if (!dirPath) {
-		return {
-			success: false,
-			error: 'Error: a directory path must be provided.',
-		};
+		return { success: false, error: 'Error: a directory path must be provided.' };
 	}
 	try {
 		await fs.mkdir(dirPath, { recursive: true });
@@ -293,7 +290,7 @@ async function getProjectContextTool() {
 // --- AI Interaction Loop with Tool Use ---
 
 const systemMessage =
-	'You are a helpful AI coding assistant.\n\n**Functionality:**\n- You can use tools to read, write, and list files, run shell commands, and more.\n- For complex tasks, you must create a structured plan to break down the problem.\n\n**Instructions:**\n1.  **Analyze the Request:** Understand the user\'s goal.\n2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n    *   If a step doesn\'t require a tool, set "tool": null.\n    *   Use "output_variable": "variable_name" to store the output of a tool for later use.\n    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use `"${item}"` in the arguments to refer to the current item.\n3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n**Tool Definitions:**\n<tool_code>\n// Read a file\nfunction read_file(filePath: string): string;\n\n// Write content to a file\nfunction write_file(filePath: string, content: string): string;\n\n// List contents of a directory\nfunction list_directory(dirPath: string, filter?: string): string;\n\n// Run a shell command\nfunction run_shell_command(command: string): string;\n\n// Search for a pattern within a file\'s content\nfunction search_file_content(filePath: string, pattern: string): string;\n\n// Create a new directory (recursive)\nfunction create_directory(dirPath: string): string;\n\n// Replace all occurrences of a string in a file\nfunction replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n// Get comprehensive project context (package.json, README.md, root directory contents)\nfunction get_project_context(): string;\n</tool_code>\n\n**JSON Plan Format:**\n<plan>\n{\n  "plan": [\n    {\n      "step": 1,\n      "description": "List all JavaScript files in the current directory",\n      "tool": "list_directory",\n      "args": ["./", ".*\\.js$"], // dirPath, filter (regex for .js files)\n      "output_variable": "js_files"\n    },\n    {\n      "step": 2,\n      "description": "Read each JavaScript file\'s contents",\n      "tool": "read_file",\n      "iterate_on": "js_files",\n      "args": ["${item}"],\n      "output_variable": "file_content"\n    },\n    {\n      "step": 3,\n      "description": "Combine all file contents into a single output",\n      "tool": null,\n      "args": [],\n      "input_variable": "file_content"\n    }\n  ]\n}\n</plan>\n\n5.  **Handle Errors & Self-Correction:** If a tool execution fails, I will provide the error output. You should analyze the error and, if possible, generate a new plan or modify the current one to correct the issue and retry.\n\nBegin.';
+	'You are a helpful AI coding assistant.\n\n**Functionality:**\n- You can use tools to read, write, and list files, run shell commands, and more.\n- For complex tasks, you must create a structured plan to break down the problem.\n\n**Instructions:**\n1.  **Analyze the Request:** Understand the user\'s goal.\n2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n    *   If a step doesn\'t require a tool, set "tool": null.\n    *   Use "output_variable": "variable_name" to store the output of a tool for later use.\n    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use `"${item}"` in the arguments to refer to the current item.\n3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n**Tool Definitions:**\n<tool_code>\n// Read a file\nfunction read_file(filePath: string): string;\n\n// Write content to a file\nfunction write_file(filePath: string, content: string): string;\n\n// List contents of a directory\nfunction list_directory(dirPath: string, filter?: string): string;\n\n// Run a shell command\nfunction run_shell_command(command: string): string;\n\n// Search for a pattern within a file\'s content\nfunction search_file_content(filePath: string, pattern: string): string;\n\n// Create a new directory (recursive)\nfunction create_directory(dirPath: string): string;\n\n// Replace all occurrences of a string in a file\nfunction replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n// Get comprehensive project context (package.json, README.md, root directory contents)\nfunction get_project_context(): string;\n</tool_code>';
 
 const HISTORY_FILE = 'conversation_history.json';
 
@@ -415,9 +412,22 @@ function validatePlan(plan) {
 	return true;
 }
 
+async function handleToolError(failedStep, error, context, messages, rl) {
+	console.error(`\n--- Tool Error: Step ${failedStep.step} failed ---`);
+	console.error(`Error: ${error}`);
+
+	// Construct a new prompt for the AI to ask for a new plan
+	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nPlease provide a new plan to achieve the original goal, taking this error into account.\n`;
+
+	// Send the new prompt to the AI and get a new plan
+	return await processMessage(newPrompt, messages, rl);
+}
+
 async function processMessage(userMessage, messages, rl) {
-	if (userMessage) {
+	if (userMessage && !userMessage.includes('The following step in the plan failed')) {
 		messages.push({ role: 'user', content: userMessage });
+	} else if (userMessage) {
+		messages.push({ role: 'system', content: userMessage });
 	}
 
 	let finalAnswer = false;
@@ -495,14 +505,10 @@ async function processMessage(userMessage, messages, rl) {
 				try {
 					const plan = JSON.parse(planJson);
 					if (validatePlan(plan)) {
-						console.log(`
---- AI's Plan ---
-${JSON.stringify(plan, null, 2)}
--------------------`);
+						console.log(`\n--- AI\'s Plan ---\n${JSON.stringify(plan, null, 2)}\n-------------------`);
 						for (let i = 0; i < plan.plan.length; i++) {
 							const step = plan.plan[i];
-							console.log(`
---- Executing Step ${step.step}: ${step.description} ---`);
+							console.log(`\n--- Executing Step ${step.step}: ${step.description} ---`);
 
 							let itemsToIterate = [];
 							if (step.iterate_on) {
@@ -520,96 +526,98 @@ ${JSON.stringify(plan, null, 2)}
 
 							let stepOutput = [];
 							for (const item of itemsToIterate) {
-								if (step.tool) {
-									const { tool, args } = step;
-									let resolvedArgs = args.map((arg) => {
-										// Resolve placeholders like ${variable_name} or ${item}
-										if (typeof arg === 'string') {
-											if (arg === '${item}') {
-												return item;
+								let result;
+								try {
+									if (step.tool) {
+										const { tool, args } = step;
+										let resolvedArgs = args.map((arg) => {
+											// Resolve placeholders like ${variable_name} or ${item}
+											if (typeof arg === 'string') {
+												if (arg === '${item}') {
+													return item;
+												}
+												const varMatch = arg.match(/^\$\{(.*)\}$/);
+												if (varMatch) {
+													const varName = varMatch[1];
+													return context[varName] || arg;
+												}
 											}
-											const varMatch = arg.match(/^\$\{(.*)\}$/);
-											if (varMatch) {
-												const varName = varMatch[1];
-												return context[varName] || arg;
+											return arg;
+										});
+
+										if (tool === 'list_directory' && resolvedArgs.length > 1) {
+											// If filter is provided
+											result = await listDirectoryTool(
+												resolvedArgs[0],
+												resolvedArgs[1]
+											);
+										} else {
+											switch (tool) {
+												case 'read_file':
+													result = await readFileTool(resolvedArgs[0]);
+													break;
+												case 'write_file':
+													result = await writeFileTool(
+														resolvedArgs[0],
+														resolvedArgs[1],
+														rl
+													);
+													break;
+												case 'list_directory':
+													result = await listDirectoryTool(resolvedArgs[0]);
+													break;
+												case 'run_shell_command':
+													result = await runShellCommandTool(resolvedArgs[0], rl);
+													break;
+												case 'search_file_content':
+													result = await searchFileContentTool(
+														resolvedArgs[0],
+														resolvedArgs[1]
+													);
+													break;
+												case 'create_directory':
+													result = await createDirectoryTool(resolvedArgs[0]);
+													break;
+												case 'replace_in_file':
+													result = await replaceInFileTool(
+														resolvedArgs[0],
+														resolvedArgs[1],
+														resolvedArgs[2],
+														rl
+													);
+													break;
+												case 'get_project_context':
+													result = await getProjectContextTool();
+													break;
+												default:
+													result = {
+														success: false,
+														error: `Unknown tool: ${tool}`,
+													};
 											}
 										}
-										return arg;
-									});
 
-									let result;
-									if (tool === 'list_directory' && resolvedArgs.length > 1) {
-										// If filter is provided
-										result = await listDirectoryTool(
-											resolvedArgs[0],
-											resolvedArgs[1]
-										);
-									} else {
-										switch (tool) {
-											case 'read_file':
-												result = await readFileTool(resolvedArgs[0]);
-												break;
-											case 'write_file':
-												result = await writeFileTool(
-													resolvedArgs[0],
-													resolvedArgs[1],
-													rl
-												);
-												break;
-											case 'list_directory':
-												result = await listDirectoryTool(resolvedArgs[0]);
-												break;
-											case 'run_shell_command':
-												result = await runShellCommandTool(resolvedArgs[0], rl);
-												break;
-											case 'search_file_content':
-												result = await searchFileContentTool(
-													resolvedArgs[0],
-													resolvedArgs[1]
-												);
-												break;
-											case 'create_directory':
-												result = await createDirectoryTool(resolvedArgs[0]);
-												break;
-											case 'replace_in_file':
-												result = await replaceInFileTool(
-													resolvedArgs[0],
-													resolvedArgs[1],
-													resolvedArgs[2],
-													rl
-												);
-												break;
-											case 'get_project_context':
-												result = await getProjectContextTool();
-												break;
-											default:
-												result = {
-													success: false,
-													error: `Unknown tool: ${tool}`,
-												};
+										if (!result.success) {
+											throw new Error(result.error);
 										}
-									}
 
-									const outputMessage = result.success
-										? `<tool_output>${result.output}</tool_output>`
-										: `<tool_output_error>${result.error}</tool_output_error>`;
-									console.log(`--- Tool Output ---
-${result.output || result.error}
--------------------`);
-									messages.push({ role: 'tool', content: outputMessage });
-									interactionLog.tool_executions.push({
-										tool_call: `${tool}(${resolvedArgs.join(', ')})`,
-										tool_output: outputMessage,
-									});
+										const outputMessage = `<tool_output>${result.output}<\/tool_output>`;
+										console.log(`--- Tool Output ---\n${result.output}\n-------------------`);
+										messages.push({ role: 'tool', content: outputMessage });
+										interactionLog.tool_executions.push({
+											tool_call: `${tool}(${resolvedArgs.join(', ')})`,
+											tool_output: outputMessage,
+										});
 
-									if (result.success) {
 										stepOutput.push(result.output);
+									} else {
+										// If no tool, but input_variable is present, use it as output
+										if (step.input_variable && context[step.input_variable]) {
+											stepOutput.push(context[step.input_variable]);
+										}
 									}
-								} else {
-									// If no tool, but input_variable is present, use it as output
-									if (step.input_variable && context[step.input_variable]) {
-										stepOutput.push(context[step.input_variable]);
-									}
+								} catch (error) {
+									return await handleToolError(step, error.message, context, messages, rl);
 								}
 							}
 
@@ -626,7 +634,7 @@ ${result.output || result.error}
 						messages.push({
 							role: 'tool',
 							content:
-								'<tool_output_error>Invalid plan received. Please provide a valid JSON plan.</tool_output_error>',
+								'<tool_output_error>Invalid plan received. Please provide a valid JSON plan.<\/tool_output_error>',
 						});
 					}
 				} catch (error) {
@@ -696,9 +704,7 @@ ${result.output || result.error}
 							const outputMessage = result.success
 								? `<tool_output>${result.output}<\/tool_output>`
 								: `<tool_output_error>${result.error}<\/tool_output_error>`;
-							console.log(`--- Tool Output ---
-${result.output || result.error}
--------------------`);
+							console.log(`--- Tool Output ---\n${result.output || result.error}\n-------------------`);
 							messages.push({ role: 'tool', content: outputMessage });
 							interactionLog.tool_executions.push({
 								tool_call: toolCall,
@@ -752,11 +758,9 @@ async function chatWithAI(initialPrompt = null) {
 		const packageJsonPath = `${projectRoot}/package.json`;
 		const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
 		const packageJson = JSON.parse(packageJsonContent);
-		projectOverview += `package.json (name: ${
-			packageJson.name || 'N/A'
-		}, version: ${packageJson.version || 'N/A'}, description: ${
-			packageJson.description || 'N/A'
-		})\n\n`;
+		projectOverview += `package.json (name: ${packageJson.name || 'N/A'},
+			version: ${packageJson.version || 'N/A'}, description: ${packageJson.description || 'N/A'})
+			\n\n`;
 	} catch (error) {
 		projectOverview += `package.json not found or error reading: ${error.message}\n\n`;
 	}
@@ -815,8 +819,7 @@ async function chatWithAI(initialPrompt = null) {
 		process.exit(0);
 	} else {
 		console.log(
-			`
---- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n`
+			`\n--- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n`
 		);
 		rl.prompt();
 	}

@@ -74,6 +74,12 @@ local AI coder. To recap, we now have:
     *   **Fine-tuning Process:** **Outlined** (`fine_tune_model.py` provides a conceptual script for fine-tuning using Hugging Face `transformers` and `PEFT`. Actual execution requires manual setup and significant computational resources).
     *   **Deployment of Fine-tuned Model:** **Outlined** (Steps to integrate a fine-tuned model with Ollama, including merging adapters, converting to GGUF, creating a Modelfile, and importing the model).
 
+    ### Testing the Data Formatting Script
+    To test the `data_formatter.py` module:
+    1.  **Generate Interaction Data:** Use the CLI agent (`local-ai-coder`) to interact with the AI and generate some `agent_interactions.jsonl` content.
+    2.  **Run the Formatting Script:** Execute `python3 data_formatter.py` from your project root.
+    3.  **Verify Output:** Inspect the `formatted_data.jsonl` file to ensure the data is correctly structured for fine-tuning. Each line should be a JSON object with a `messages` array, containing `user` and `assistant` roles, with tool calls and outputs embedded in the assistant's content.
+
 2.  **Enhance Tool Use (Further Robustness & Features):**
     *   **More Robust Tool Parsing:** Current parsing is regex-based; could be improved for complex arguments or multiple tool calls in a single AI response more reliably.
     *   **Comprehensive Error Handling:** Enhance error handling in `processMessage` for AI interaction and tool execution failures.

@@ -43,26 +43,30 @@ A component within `cli.js` acts as the plan execution engine, responsible for:
     *   Validating `output_variable` and `iterate_on` fields if present.
     *   If validation fails, an error is logged, and a message is sent back to the AI, prompting it to correct the plan.
 
+'''
+### 5. Self-Correction (Initial Implementation)
+*   **Implemented:** The agent can now handle errors during plan execution. When a tool fails, the agent is prompted to create a new plan to recover from the error. This is achieved through the `handleToolError` function, which provides the AI with the context of the failure and asks for a new plan.
+*   **Current Status:** The implementation is focused on re-planning. The AI can create a new plan to overcome the error, but it does not yet have the ability to retry a failed step or adjust its strategy in more complex ways.
+
 ## Pending/Future Scope:
 
-### 1. Self-Correction
-*   **Goal:** Enable the AI to identify and recover from failed tool executions or unexpected outcomes during plan execution.
-*   **Current Status:** While tool functions return success/error status, the execution engine primarily logs errors. There is no explicit logic for the AI to dynamically re-plan, retry, or adjust its strategy based on these errors.
-
-### 2. More Sophisticated Context Management
+### 1. More Sophisticated Context Management
 *   **Goal:** Provide the AI with a deeper, more persistent understanding of the project's overall state, dependencies, and code structure beyond just the immediate outputs of plan steps.
 *   **Current Status:** The `context` object is limited to the current plan's execution. There's no broader mechanism for the AI to maintain a "mental model" of the project or its components across interactions.
 
-### 3. Deeper Planning & Reasoning Integration
+### 2. Deeper Planning & Reasoning Integration
 *   **Goal:** Allow the AI more dynamic control over the execution flow, enabling it to pause, ask for clarification, or modify the plan mid-execution based on intermediate results and ongoing reasoning.
 *   **Current Status:** The current implementation executes plan steps sequentially. The AI receives tool outputs after each step but doesn't have explicit mechanisms to intervene or reason *during* the execution of a multi-step plan.
 
-### 4. Fine-tuning Process (Outlined)
+### 3. Fine-tuning Process (Outlined)
 *   **Goal:** Implement the process for fine-tuning the `codellama` model using collected interaction data.
 *   **Current Status:** A conceptual Python script (`fine_tune_model.py`) has been outlined, detailing the steps for loading data, preparing the model with PEFT (LoRA), defining training arguments, and saving the fine-tuned model. Actual execution requires manual setup and significant computational resources (e.g., GPU).
 
-### 5. Deployment of Fine-tuned Model (Outlined)
+### 4. Deployment of Fine-tuned Model (Outlined)
 *   **Goal:** Integrate a fine-tuned model back into Ollama for use.
-*   **Current Status:** The process has been outlined, including steps for merging LoRA adapters with the base model (if applicable), converting the model to an Ollama-compatible format (e.g., GGUF), creating an Ollama Modelfile, and importing the model into Ollama.
+*   **Current Status:** The process has been outlined, including steps for merging LoRA adapters with the base model (if applicable), converting the model to an Ollama-compatible format (e.g., GGUF), creating an Ollama Modelfile, and importing the model into Ollama.'''
+
+### Data Formatting Script (`data_formatter.py`)
+*   **Note:** The `data_formatter.py` script is a utility designed to be run on-demand to prepare `agent_interactions.jsonl` for fine-tuning. It is not part of the live CLI operation and does not need to be run continuously.
 
 This approach provides a solid foundation, but further development in these areas will significantly enhance the agent's autonomy and intelligence.
