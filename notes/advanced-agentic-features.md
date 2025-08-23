@@ -57,4 +57,12 @@ A component within `cli.js` acts as the plan execution engine, responsible for:
 *   **Goal:** Allow the AI more dynamic control over the execution flow, enabling it to pause, ask for clarification, or modify the plan mid-execution based on intermediate results and ongoing reasoning.
 *   **Current Status:** The current implementation executes plan steps sequentially. The AI receives tool outputs after each step but doesn't have explicit mechanisms to intervene or reason *during* the execution of a multi-step plan.
 
+### 4. Fine-tuning Process (Outlined)
+*   **Goal:** Implement the process for fine-tuning the `codellama` model using collected interaction data.
+*   **Current Status:** A conceptual Python script (`fine_tune_model.py`) has been outlined, detailing the steps for loading data, preparing the model with PEFT (LoRA), defining training arguments, and saving the fine-tuned model. Actual execution requires manual setup and significant computational resources (e.g., GPU).
+
+### 5. Deployment of Fine-tuned Model (Outlined)
+*   **Goal:** Integrate a fine-tuned model back into Ollama for use.
+*   **Current Status:** The process has been outlined, including steps for merging LoRA adapters with the base model (if applicable), converting the model to an Ollama-compatible format (e.g., GGUF), creating an Ollama Modelfile, and importing the model into Ollama.
+
 This approach provides a solid foundation, but further development in these areas will significantly enhance the agent's autonomy and intelligence.

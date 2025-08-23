@@ -70,9 +70,9 @@ local AI coder. To recap, we now have:
 ### Pending/Future Scope:
 
 1.  **"Self-Learning" (Fine-tuning):**
-    *   **Data Formatting Script:** A separate script (likely Python) to transform `agent_interactions.jsonl` into a structured format suitable for fine-tuning (e.g., instruction-tuned format).
-    *   **Fine-tuning Process:** Actual training of the `codellama` model using frameworks like Hugging Face `transformers` + `PEFT` (LoRA).
-    *   **Deployment of Fine-tuned Model:** Integrating the newly fine-tuned model back into Ollama.
+    *   **Data Formatting Script:** **Implemented** (`data_formatter.py` transforms `agent_interactions.jsonl` into `formatted_data.jsonl` for fine-tuning).
+    *   **Fine-tuning Process:** **Outlined** (`fine_tune_model.py` provides a conceptual script for fine-tuning using Hugging Face `transformers` and `PEFT`. Actual execution requires manual setup and significant computational resources).
+    *   **Deployment of Fine-tuned Model:** **Outlined** (Steps to integrate a fine-tuned model with Ollama, including merging adapters, converting to GGUF, creating a Modelfile, and importing the model).
 
 2.  **Enhance Tool Use (Further Robustness & Features):**
     *   **More Robust Tool Parsing:** Current parsing is regex-based; could be improved for complex arguments or multiple tool calls in a single AI response more reliably.
