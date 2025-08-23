@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { promises as fs } from 'fs';
 import { exec } from 'child_process';
 import readline from 'readline';
+import ContextManager from './contextManager.js';
 
 const program = new Command();
 
@@ -287,10 +288,107 @@ async function getProjectContextTool() {
 	}
 }
 
+async function getContextTool(contextManager) {
+	return { success: true, output: JSON.stringify(contextManager.context, null, 2) };
+}
+
+async function updateContextTool(contextManager, key, value) {
+	contextManager.update(key, value);
+	return { success: true, output: `Context updated successfully.` };
+}
+
+async function summarizeFileTool(contextManager, filePath) {
+	const fileContent = await readFileTool(filePath);
+	if (!fileContent.success) {
+		return fileContent;
+	}
+
+	const prompt = `Please summarize the following file content:\n\n${fileContent.output}`;
+	const summary = await getAIResponse(prompt);
+
+	const fileSummaries = contextManager.get('file_summaries');
+	fileSummaries[filePath] = summary;
+	contextManager.update('file_summaries', fileSummaries);
+
+	return { success: true, output: `File ${filePath} summarized and added to context.` };
+}
+
+async function getAIResponse(prompt) {
+	const response = await fetch('http://localhost:11434/api/chat', {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({
+			model: 'codellama',
+			messages: [{ role: 'user', content: prompt }],
+			stream: false,
+		}),
+	});
+
+	if (!response.ok) {
+		throw new Error(`HTTP error! status: ${response.status}`);
+	}
+
+	const json = await response.json();
+	return json.message.content;
+}
+
 // --- AI Interaction Loop with Tool Use ---
 
-const systemMessage =
-	'You are a helpful AI coding assistant.\n\n**Functionality:**\n- You can use tools to read, write, and list files, run shell commands, and more.\n- For complex tasks, you must create a structured plan to break down the problem.\n\n**Instructions:**\n1.  **Analyze the Request:** Understand the user\'s goal.\n2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n    *   If a step doesn\'t require a tool, set "tool": null.\n    *   Use "output_variable": "variable_name" to store the output of a tool for later use.\n    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use `"${item}"` in the arguments to refer to the current item.\n3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n**Tool Definitions:**\n<tool_code>\n// Read a file\nfunction read_file(filePath: string): string;\n\n// Write content to a file\nfunction write_file(filePath: string, content: string): string;\n\n// List contents of a directory\nfunction list_directory(dirPath: string, filter?: string): string;\n\n// Run a shell command\nfunction run_shell_command(command: string): string;\n\n// Search for a pattern within a file\'s content\nfunction search_file_content(filePath: string, pattern: string): string;\n\n// Create a new directory (recursive)\nfunction create_directory(dirPath: string): string;\n\n// Replace all occurrences of a string in a file\nfunction replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n// Get comprehensive project context (package.json, README.md, root directory contents)\nfunction get_project_context(): string;\n</tool_code>';
+const systemMessage = `You are a helpful AI coding assistant.
+
+**Functionality:**
+- You can use tools to read, write, and list files, run shell commands, and more.
+- For complex tasks, you must create a structured plan to break down the problem.
+- If the user asks to perform a file operation (read, write, summarize, etc.), you should use the corresponding tool.
+
+**Instructions:**
+1.  **Analyze the Request:** Understand the user's goal.
+2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.
+    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.
+    *   If a step doesn't require a tool, set "tool": null.
+    *   Use "output_variable": "variable_name" to store the output of a tool for later use.
+    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use "\"\${item}\"" in the arguments to refer to the current item.
+3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.
+4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.
+
+**Tool Definitions:**
+<tool_code>
+// Read a file
+function read_file(filePath: string): string;
+
+// Write content to a file
+function write_file(filePath: string, content: string): string;
+
+// List contents of a directory
+function list_directory(dirPath: string, filter?: string): string;
+
+// Run a shell command
+function run_shell_command(command: string): string;
+
+// Search for a pattern within a file's content
+function search_file_content(filePath: string, pattern: string): string;
+
+// Create a new directory (recursive)
+function create_directory(dirPath: string): string;
+
+// Replace all occurrences of a string in a file
+function replace_in_file(filePath: string, oldString: string, newString: string): string;
+
+// Get comprehensive project context (package.json, README.md, root directory contents)
+function get_project_context(): string;
+
+// Get the current context
+function get_context(): string;
+
+// Update the context with a new key-value pair
+function update_context(key: string, value: any): string;
+
+// Summarize a file and add it to the context
+function summarize_file(filePath: string): string;
+
+</tool_code>`
 
 const HISTORY_FILE = 'conversation_history.json';
 
@@ -368,6 +466,9 @@ function validatePlan(plan) {
 		'create_directory',
 		'replace_in_file',
 		'get_project_context',
+		'get_context',
+		'update_context',
+		'summarize_file',
 	];
 
 	for (let i = 0; i < plan.plan.length; i++) {
@@ -412,7 +513,7 @@ function validatePlan(plan) {
 	return true;
 }
 
-async function handleToolError(failedStep, error, context, messages, rl) {
+async function handleToolError(failedStep, error, context, messages, rl, contextManager) {
 	console.error(`\n--- Tool Error: Step ${failedStep.step} failed ---`);
 	console.error(`Error: ${error}`);
 
@@ -420,10 +521,10 @@ async function handleToolError(failedStep, error, context, messages, rl) {
 	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nPlease provide a new plan to achieve the original goal, taking this error into account.\n`;
 
 	// Send the new prompt to the AI and get a new plan
-	return await processMessage(newPrompt, messages, rl);
+	return await processMessage(newPrompt, messages, rl, contextManager);
 }
 
-async function processMessage(userMessage, messages, rl) {
+async function processMessage(userMessage, messages, rl, contextManager) {
 	if (userMessage && !userMessage.includes('The following step in the plan failed')) {
 		messages.push({ role: 'user', content: userMessage });
 	} else if (userMessage) {
@@ -436,7 +537,7 @@ async function processMessage(userMessage, messages, rl) {
 		ai_responses: [],
 		tool_executions: [],
 	};
-	let context = {}; // New context object to store results
+	let context = contextManager.context; // Get context from the manager
 
 	while (!finalAnswer) {
 		try {
@@ -545,79 +646,83 @@ async function processMessage(userMessage, messages, rl) {
 											return arg;
 										});
 
-										if (tool === 'list_directory' && resolvedArgs.length > 1) {
-											// If filter is provided
-											result = await listDirectoryTool(
-												resolvedArgs[0],
-												resolvedArgs[1]
-											);
-										} else {
-											switch (tool) {
-												case 'read_file':
-													result = await readFileTool(resolvedArgs[0]);
-													break;
-												case 'write_file':
-													result = await writeFileTool(
-														resolvedArgs[0],
-														resolvedArgs[1],
-														rl
-													);
-													break;
-												case 'list_directory':
-													result = await listDirectoryTool(resolvedArgs[0]);
-													break;
-												case 'run_shell_command':
-													result = await runShellCommandTool(resolvedArgs[0], rl);
-													break;
-												case 'search_file_content':
-													result = await searchFileContentTool(
-														resolvedArgs[0],
-														resolvedArgs[1]
-													);
-													break;
-												case 'create_directory':
-													result = await createDirectoryTool(resolvedArgs[0]);
-													break;
-												case 'replace_in_file':
-													result = await replaceInFileTool(
-														resolvedArgs[0],
-														resolvedArgs[1],
-														resolvedArgs[2],
-														rl
-													);
-													break;
-												case 'get_project_context':
-													result = await getProjectContextTool();
-													break;
-												default:
-													result = {
-														success: false,
-														error: `Unknown tool: ${tool}`,
-													};
-											}
-										}
-
-										if (!result.success) {
-											throw new Error(result.error);
-										}
-
-										const outputMessage = `<tool_output>${result.output}<\/tool_output>`;
-										console.log(`--- Tool Output ---\n${result.output}\n-------------------`);
-										messages.push({ role: 'tool', content: outputMessage });
-										interactionLog.tool_executions.push({
-											tool_call: `${tool}(${resolvedArgs.join(', ')})`,
-											tool_output: outputMessage,
-										});
-
-										stepOutput.push(result.output);
+									if (tool === 'list_directory' && resolvedArgs.length > 1) {
+										// If filter is provided
+										result = await listDirectoryTool(
+											resolvedArgs[0],
+											resolvedArgs[1]
+										);
 									} else {
-										// If no tool, but input_variable is present, use it as output
-										if (step.input_variable && context[step.input_variable]) {
-											stepOutput.push(context[step.input_variable]);
+										switch (tool) {
+											case 'read_file':
+												result = await readFileTool(resolvedArgs[0]);
+												break;
+											case 'write_file':
+												result = await writeFileTool(
+													resolvedArgs[0],
+													resolvedArgs[1],
+													rl
+												);
+												break;
+											case 'list_directory':
+												result = await listDirectoryTool(resolvedArgs[0]);
+												break;
+											case 'run_shell_command':
+												result = await runShellCommandTool(resolvedArgs[0], rl);
+												break;
+											case 'search_file_content':
+												result = await searchFileContentTool(
+													resolvedArgs[0],
+													resolvedArgs[1]
+												);
+												break;
+											case 'create_directory':
+												result = await createDirectoryTool(resolvedArgs[0]);
+												break;
+											case 'replace_in_file':
+												result = await replaceInFileTool(
+													resolvedArgs[0],
+													resolvedArgs[1],
+													resolvedArgs[2],
+													rl
+												);
+												break;
+											case 'get_project_context':
+												result = await getProjectContextTool();
+												break;
+											case 'get_context':
+												result = await getContextTool(contextManager);
+												break;
+											case 'update_context':
+												result = await updateContextTool(contextManager, resolvedArgs[0], resolvedArgs[1]);
+												break;
+											case 'summarize_file':
+												result = await summarizeFileTool(contextManager, resolvedArgs[0]);
+												break;
+											default:
+												result = {
+													success: false,
+													error: `Unknown tool: ${tool}`,
+												};
 										}
 									}
+
+									if (!result.success) {
+										throw new Error(result.error);
+									}
+
+									const outputMessage = `<tool_output>${result.output}<\/tool_output>`;
+									console.log(`--- Tool Output ---\n${result.output}\n-------------------`);
+									messages.push({ role: 'tool', content: outputMessage });
+									interactionLog.tool_executions.push({
+										tool_call: `${tool}(${resolvedArgs.join(', ')})`,
+										tool_output: outputMessage,
+									});
+
+									stepOutput.push(result.output);
+								} 
 								} catch (error) {
-									return await handleToolError(step, error.message, context, messages, rl);
+									return await handleToolError(step, error.message, context, messages, rl, contextManager);
 								}
 							}
 
@@ -738,6 +843,10 @@ async function processMessage(userMessage, messages, rl) {
 }
 
 async function chatWithAI(initialPrompt = null) {
+	const contextManager = new ContextManager();
+	await contextManager.load();
+	await contextManager.save();
+
 	let messages = await loadHistory(); // Load history at the start
 
 	// --- Project Context Awareness: Automatically inject project overview ---
@@ -812,7 +921,7 @@ async function chatWithAI(initialPrompt = null) {
 		console.log(
 			`\n--- Local AI Coder (Agent Mode) ---\nUser: ${initialPrompt}\n`
 		);
-		const interactionLog = await processMessage(initialPrompt, messages, rl);
+		const interactionLog = await processMessage(initialPrompt, messages, rl, contextManager);
 		await logInteraction(interactionLog);
 		await saveHistory(messages);
 		rl.close();
@@ -834,7 +943,7 @@ async function chatWithAI(initialPrompt = null) {
 			return;
 		}
 
-		const interactionLog = await processMessage(userMessage, messages, rl);
+		const interactionLog = await processMessage(userMessage, messages, rl, contextManager);
 		await logInteraction(interactionLog);
 		rl.prompt(); // Re-display the prompt after AI response
 	});
