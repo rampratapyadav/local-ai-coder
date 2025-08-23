@@ -336,59 +336,7 @@ async function getAIResponse(prompt) {
 
 // --- AI Interaction Loop with Tool Use ---
 
-const systemMessage = `You are a helpful AI coding assistant.
-
-**Functionality:**
-- You can use tools to read, write, and list files, run shell commands, and more.
-- For complex tasks, you must create a structured plan to break down the problem.
-- If the user asks to perform a file operation (read, write, summarize, etc.), you should use the corresponding tool.
-
-**Instructions:**
-1.  **Analyze the Request:** Understand the user's goal.
-2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.
-    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.
-    *   If a step doesn't require a tool, set "tool": null.
-    *   Use "output_variable": "variable_name" to store the output of a tool for later use.
-    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use "\"\${item}\"" in the arguments to refer to the current item.
-3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.
-4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.
-
-**Tool Definitions:**
-<tool_code>
-// Read a file
-function read_file(filePath: string): string;
-
-// Write content to a file
-function write_file(filePath: string, content: string): string;
-
-// List contents of a directory
-function list_directory(dirPath: string, filter?: string): string;
-
-// Run a shell command
-function run_shell_command(command: string): string;
-
-// Search for a pattern within a file's content
-function search_file_content(filePath: string, pattern: string): string;
-
-// Create a new directory (recursive)
-function create_directory(dirPath: string): string;
-
-// Replace all occurrences of a string in a file
-function replace_in_file(filePath: string, oldString: string, newString: string): string;
-
-// Get comprehensive project context (package.json, README.md, root directory contents)
-function get_project_context(): string;
-
-// Get the current context
-function get_context(): string;
-
-// Update the context with a new key-value pair
-function update_context(key: string, value: any): string;
-
-// Summarize a file and add it to the context
-function summarize_file(filePath: string): string;
-
-</tool_code>`
+const systemMessage = `You are a helpful AI coding assistant.\n\n**Functionality:**\n- You can use tools to read, write, and list files, run shell commands, and more.\n- For complex tasks, you must create a structured plan to break down the problem.\n- If the user asks to perform a file operation (read, write, summarize, etc.), you should use the corresponding tool.\n\n**Instructions:**\n1.  **Analyze the Request:** Understand the user's goal.\n2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n    *   If a step doesn't require a tool, set "tool": null.\n    *   Use "output_variable": "variable_name" to store the output of a tool for later use.\n    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use "\"\${item}\"" in the arguments to refer to the current item.\n3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n**Tool Definitions:**\n<tool_code>\n// Read a file\nfunction read_file(filePath: string): string;\n\n// Write content to a file\nfunction write_file(filePath: string, content: string): string;\n\n// List contents of a directory\nfunction list_directory(dirPath: string, filter?: string): string;\n\n// Run a shell command\nfunction run_shell_command(command: string): string;\n\n// Search for a pattern within a file's content\nfunction search_file_content(filePath: string, pattern: string): string;\n\n// Create a new directory (recursive)\nfunction create_directory(dirPath: string): string;\n\n// Replace all occurrences of a string in a file\nfunction replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n// Get comprehensive project context (package.json, README.md, root directory contents)\nfunction get_project_context(): string;\n\n// Get the current context\nfunction get_context(): string;\n\n// Update the context with a new key-value pair\nfunction update_context(key: string, value: any): string;\n\n// Summarize a file and add it to the context\nfunction summarize_file(filePath: string): string;\n\n</tool_code>`
 
 const HISTORY_FILE = 'conversation_history.json';
 
@@ -513,15 +461,29 @@ function validatePlan(plan) {
 	return true;
 }
 
-async function handleToolError(failedStep, error, context, messages, rl, contextManager) {
+async function handleToolError(failedStep, error, context, messages, rl, contextManager, currentPlan, currentStepIndex) {
 	console.error(`\n--- Tool Error: Step ${failedStep.step} failed ---`);
 	console.error(`Error: ${error}`);
 
 	// Construct a new prompt for the AI to ask for a new plan
-	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nPlease provide a new plan to achieve the original goal, taking this error into account.\n`;
+	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nThe current plan was:\n${JSON.stringify(currentPlan, null, 2)}\n\nThe current step index was: ${currentStepIndex}\n\nPlease provide a new plan to achieve the original goal, taking this error into account. If you provide a new plan, include it in a <plan> block and specify a "newStepIndex" if you want to restart from a specific step (default is 0).\n`;
 
 	// Send the new prompt to the AI and get a new plan
-	return await processMessage(newPrompt, messages, rl, contextManager);
+	const interactionLog = await processMessage(newPrompt, messages, rl, contextManager);
+
+	// Check if the AI provided a new plan in its response
+	const planMatch = interactionLog.ai_responses[interactionLog.ai_responses.length - 1].match(/<plan>([\s\S]*?)<\/plan>/);
+	if (planMatch) {
+		try {
+			const newPlanJson = JSON.parse(planMatch[1].trim());
+			if (validatePlan(newPlanJson)) {
+				return { newPlan: newPlanJson, newStepIndex: newPlanJson.newStepIndex };
+			}
+		} catch (e) {
+			console.error("Error parsing new plan from AI in handleToolError:", e);
+		}
+	}
+	return null; // No new plan provided
 }
 
 async function processMessage(userMessage, messages, rl, contextManager) {
@@ -538,6 +500,8 @@ async function processMessage(userMessage, messages, rl, contextManager) {
 		tool_executions: [],
 	};
 	let context = contextManager.context; // Get context from the manager
+	let currentPlan = null; // To store the currently executing plan
+	let currentStepIndex = 0; // To track the current step in the plan
 
 	while (!finalAnswer) {
 		try {
@@ -604,11 +568,38 @@ async function processMessage(userMessage, messages, rl, contextManager) {
 			if (planMatch) {
 				const planJson = planMatch[1].trim();
 				try {
-					const plan = JSON.parse(planJson);
-					if (validatePlan(plan)) {
-						console.log(`\n--- AI\'s Plan ---\n${JSON.stringify(plan, null, 2)}\n-------------------`);
-						for (let i = 0; i < plan.plan.length; i++) {
-							const step = plan.plan[i];
+					const newPlanCandidate = JSON.parse(planJson);
+					const isModification = planMatch[0].includes('modify="true"'); // Check for modify attribute
+
+					if (isModification) {
+						console.log(`\n--- AI Proposes Plan Modification ---`);
+						console.log(`${JSON.stringify(newPlanCandidate, null, 2)}\n-------------------`);
+						await new Promise(resolve => {
+							rl.question('AI proposes to modify the plan. Do you approve? (y/n): ', (answer) => {
+								if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+									currentPlan = newPlanCandidate;
+									currentStepIndex = newPlanCandidate.newStepIndex || 0; // AI can suggest where to restart
+									console.log('Plan modification approved. Resuming execution.');
+								} else {
+									console.log('Plan modification rejected. Continuing with existing plan or awaiting new instructions.');
+									// If rejected, we might want to send a message back to the AI
+									messages.push({ role: 'user', content: 'User rejected plan modification. Please provide an alternative or continue with the original task.' });
+								}
+								resolve();
+							});
+						});
+						if (!currentPlan || (currentPlan !== newPlanCandidate && isModification)) { // If modification was rejected or no plan was set
+							continue; // Go back to the start of the while loop to get AI's next response
+						}
+					} else {
+						currentPlan = newPlanCandidate;
+						currentStepIndex = 0; // Reset on new plan
+					}
+
+					if (validatePlan(currentPlan)) {
+						console.log(`\n--- AI\'s Plan ---` + "\n" + `${JSON.stringify(currentPlan, null, 2)}\n-------------------`);
+						while (currentStepIndex < currentPlan.plan.length) {
+							const step = currentPlan.plan[currentStepIndex];
 							console.log(`\n--- Executing Step ${step.step}: ${step.description} ---`);
 
 							let itemsToIterate = [];
@@ -722,36 +713,64 @@ async function processMessage(userMessage, messages, rl, contextManager) {
 									stepOutput.push(result.output);
 								} 
 								} catch (error) {
-									return await handleToolError(step, error.message, context, messages, rl, contextManager);
-								}
-							}
+                                    // Pass currentPlan and currentStepIndex to handleToolError
+                                    const newPlanResult = await handleToolError(step, error.message, context, messages, rl, contextManager, currentPlan, currentStepIndex);
+                                    if (newPlanResult && newPlanResult.newPlan) {
+                                        currentPlan = newPlanResult.newPlan;
+                                        currentStepIndex = newPlanResult.newStepIndex || 0; // AI can suggest where to restart
+                                        return; // Restart the while loop with the new plan
+                                    } else {
+                                        throw error; // Re-throw if no new plan is provided
+                                    }
+                                }
+                            }
 
-							if (step.output_variable && stepOutput.length > 0) {
-								context[step.output_variable] =
-									stepOutput.length === 1 ? stepOutput[0] : stepOutput;
-							}
-						}
-					} else {
-						console.error(
-							'Invalid plan received from AI. Skipping plan execution.'
-						);
-						// Optionally, send a message back to the AI about the invalid plan
-						messages.push({
-							role: 'tool',
-							content:
-								'<tool_output_error>Invalid plan received. Please provide a valid JSON plan.<\/tool_output_error>',
-						});
-					}
-				} catch (error) {
-					console.error(`Error parsing or executing plan: ${error.message}`);
-				}
-			} else {
-				const toolCodeMatches = aiResponseContent.matchAll(
-					/<tool_code>([\s\S]*?)<\/tool_code>/g
-				);
-				let toolCalls = Array.from(toolCodeMatches).map((match) =>
-					match[1].trim()
-				);
+                            if (step.output_variable && stepOutput.length > 0) {
+                                context[step.output_variable] =
+                                    stepOutput.length === 1 ? stepOutput[0] : stepOutput;
+                            }
+                            currentStepIndex++; // Move to the next step
+                        }
+                    } else {
+                        console.error(
+                            'Invalid plan received from AI. Skipping plan execution.'
+                        );
+                        // Optionally, send a message back to the AI about the invalid plan
+                        messages.push({
+                            role: 'tool',
+                            content:
+                                '<tool_output_error>Invalid plan received. Please provide a valid JSON plan.<\/tool_output_error>',
+                        });
+                    }
+                } catch (error) {
+                    console.error(`Error parsing or executing plan: ${error.message}`);
+                }
+            } else {
+                // Check for <pause> tag
+                const pauseMatch = aiResponseContent.match(/<pause>([\s\S]*?)<\/pause>/);
+                if (pauseMatch) {
+                    const pauseContent = JSON.parse(pauseMatch[1].trim());
+                    console.log(`\n--- PAUSE: ${pauseContent.reason} ---\n${pauseContent.message}\n-------------------`);
+                    // Wait for user input to resume or provide new instructions
+                    await new Promise(resolve => {
+                        rl.question('Press Enter to continue or type new instructions: ', (input) => {
+                            if (input.trim() !== '') {
+                                messages.push({ role: 'user', content: input.trim() });
+                            } else {
+                                messages.push({ role: 'user', content: 'Continue plan execution.' });
+                            }
+                            resolve();
+                        });
+                    });
+                    continue; // Continue the main while loop to get AI's next response
+                }
+
+                const toolCodeMatches = aiResponseContent.matchAll(
+                    /<tool_code>([\s\S]*?)<\/tool_code>/g
+                );
+                let toolCalls = Array.from(toolCodeMatches).map((match) =>
+                    match[1].trim()
+                );
 
 				if (toolCalls.length > 0) {
 					for (const toolCallWithComments of toolCalls) {
