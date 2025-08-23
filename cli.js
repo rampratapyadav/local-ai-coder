@@ -815,8 +815,10 @@ async function chatWithAI(initialPrompt = null) {
 		process.exit(0);
 	} else {
 		console.log(
-			`\n--- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n`
+			`
+--- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n`
 		);
+		rl.prompt();
 	}
 
 	rl.on('line', async (line) => {
@@ -831,14 +833,13 @@ async function chatWithAI(initialPrompt = null) {
 
 		const interactionLog = await processMessage(userMessage, messages, rl);
 		await logInteraction(interactionLog);
+		rl.prompt(); // Re-display the prompt after AI response
 	});
 
 	rl.on('close', async () => {
 		await saveHistory(messages); // Save history on close
 		console.log('\n--- Agent Session Ended ---');
 	});
-
-	rl.prompt();
 }
 
 program.arguments('[prompt...]').action(async (promptArgs) => {
