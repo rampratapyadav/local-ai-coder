@@ -73,12 +73,15 @@ local AI coder. To recap, we now have:
     *   **Merge and Export Script:** `merge_and_export.py` script to merge the trained LoRA adapters with the base model.
     *   **Deployment Instructions:** The process for converting the model to GGUF and running it in Ollama is documented.
 
+5.  **Advanced Self-Correction:**
+    *   When a tool fails, the agent can now choose between several recovery strategies: retrying the step (with or without modified arguments), proposing an alternative step, creating a new plan, or asking the user for help.
+
 ### Pending/Future Scope:
 
 ### Core Agent Capabilities
 
 
-*   **Advanced Self-Correction:** The current implementation can create a new plan on failure. However, more advanced self-correction, such as intelligently retrying a failed step with modified arguments or adjusting the strategy without a full re-plan, is not yet implemented.
+
 *   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
 *   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
 

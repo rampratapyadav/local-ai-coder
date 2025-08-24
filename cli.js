@@ -20,8 +20,6 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
     let currentMessages = [...messages];
 
     if (planState.isPlanExecuting) {
-        // If a plan is already executing, the AI should not generate a new plan
-        // Instead, it should continue processing the current plan or respond to an error
         currentMessages.push({
             role: 'system',
             content: 'A plan is currently executing. Do not generate a new plan. Respond to the current plan\'s state or error.',
@@ -40,13 +38,14 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
             aiResponseContent += chunk.message.content;
             process.stdout.write(chunk.message.content);
         }
-        process.stdout.write('\n'); // New line after AI response
+        process.stdout.write('\n');
 
         interactionLog.ai_responses.push(aiResponseContent);
         messages.push({ role: 'assistant', content: aiResponseContent });
 
         const planMatch = aiResponseContent.match(/<plan>([\s\S]*?)<\/plan>/);
         const toolCallMatch = aiResponseContent.match(/<tool_code>([\s\S]*?)<\/tool_code>/);
+        const recoveryMatch = aiResponseContent.match(/<recovery>([\s\S]*?)<\/recovery>/);
 
         if (planMatch) {
             try {
@@ -56,31 +55,21 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
                     planState.currentStepIndex = 0;
                     planState.isPlanExecuting = true;
                     console.log('\n--- Plan Received and Validated ---');
-                    const result = await executePlanSteps(planState, contextManager.getContext(), messages, rl, contextManager, interactionLog);
-                    if (result && result.newPlan) {
-                        planState.currentPlan = result.newPlan;
-                        planState.currentStepIndex = result.newStepIndex || 0;
-                        planState.isPlanExecuting = true;
-                        await executePlanSteps(planState, contextManager.getContext(), messages, rl, contextManager, interactionLog);
-                    } else {
-                        planState.isPlanExecuting = false;
-                        planState.currentPlan = null;
-                        planState.currentStepIndex = 0;
-                    }
+                    await executePlanSteps(planState, contextManager.getContext(), messages, rl, contextManager, interactionLog);
                 } else {
                     console.error('\n--- Invalid Plan Received ---');
                     messages.push({ role: 'system', content: 'The plan provided was invalid. Please provide a valid plan.' });
                 }
             } catch (e) {
                 console.error('Error parsing plan JSON:', e);
-                messages.push({ role: 'system', content: `Error parsing plan: ${e.message}. Please provide a valid JSON plan.` });
+                messages.push({ role: 'system', content: 'Error parsing plan: ' + e.message + '. Please provide a valid JSON plan.' });
             }
         } else if (toolCallMatch) {
             const toolCallCode = toolCallMatch[1].trim();
             const parsedTool = parseToolCall(toolCallCode);
 
             if (parsedTool) {
-                console.log(`\n--- Executing Tool: ${parsedTool.toolName}(${parsedTool.args.join(', ')}) ---`);
+                console.log("\n--- Executing Tool: " + parsedTool.toolName + "(" + parsedTool.args.join(', ') + ") ---");
                 let result;
                 try {
                     switch (parsedTool.toolName) {
@@ -117,42 +106,54 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
                         case 'summarize_file':
                             result = await summarizeFileTool(contextManager, parsedTool.args[0]);
                             break;
+                        case 'test_args':
+                            result = await testArgsTool(...parsedTool.args);
+                            break;
                         default:
-                            result = { success: false, error: `Unknown tool: ${parsedTool.toolName}` };
+                            result = { success: false, error: "Unknown tool: " + parsedTool.toolName };
                     }
 
                     if (result.success) {
-                        const outputMessage = `<tool_output>${result.output}<\/tool_output>`;
-                        console.log(`--- Tool Output ---\n${result.output}\n-------------------`);
+                        const outputMessage = "<tool_output>" + result.output + "<\/tool_output>";
+                        console.log("--- Tool Output ---\n" + result.output + "\n-------------------");
                         messages.push({ role: 'tool', content: outputMessage });
                         interactionLog.tool_executions.push({
                             tool_call: toolCallCode,
                             tool_output: outputMessage,
                         });
                     } else {
-                        console.error(`--- Tool Error ---\n${result.error}\n-------------------`);
-                        messages.push({ role: 'tool', content: `<tool_error>${result.error}<\/tool_error>` });
+                        console.error("--- Tool Error ---\n" + result.error + "\n-------------------");
+                        messages.push({ role: 'tool', content: "<tool_error>" + result.error + "<\/tool_error>" });
                         interactionLog.tool_executions.push({
                             tool_call: toolCallCode,
-                            tool_output: `<tool_error>${result.error}<\/tool_error>`, 
+                            tool_output: "<tool_error>" + result.error + "<\/tool_error>",
                         });
                     }
                 } catch (toolError) {
-                    console.error(`--- Tool Execution Exception ---\n${toolError.message}\n-------------------`);
-                    messages.push({ role: 'tool', content: `<tool_error>Exception during tool execution: ${toolError.message}<\/tool_error>` });
+                    console.error("--- Tool Execution Exception ---\n" + toolError.message + "\n-------------------");
+                    messages.push({ role: 'tool', content: "<tool_error>Exception during tool execution: " + toolError.message + "<\/tool_error>" });
                     interactionLog.tool_executions.push({
                         tool_call: toolCallCode,
-                        tool_output: `<tool_error>Exception during tool execution: ${toolError.message}<\/tool_error>`, 
+                        tool_output: "<tool_error>Exception during tool execution: " + toolError.message + "<\/tool_error>",
                     });
                 }
             } else {
                 console.error('\n--- Invalid Tool Call Format ---');
                 messages.push({ role: 'system', content: 'Invalid tool call format. Please use function(arg1, arg2) format.' });
             }
+        } else if (recoveryMatch) {
+            try {
+                const recoveryJson = JSON.parse(recoveryMatch[1].trim());
+                console.log("--- Recovery Strategy Received ---");
+                console.log(recoveryJson);
+                // This part is handled in the executePlanSteps catch block
+            } catch (e) {
+                console.error("Error parsing recovery JSON:", e);
+            }
         }
     } catch (error) {
         console.error('Error communicating with Ollama:', error);
-        messages.push({ role: 'system', content: `Error communicating with Ollama: ${error.message}` });
+        messages.push({ role: 'system', content: "Error communicating with Ollama: " + error.message });
     }
     return interactionLog;
 }
@@ -179,12 +180,12 @@ async function readFileTool(filePath) {
 		if (error.code === 'ENOENT') {
 			return {
 				success: false,
-				error: `Error reading file: ${filePath} not found.`,
+				error: "Error reading file: " + filePath + " not found.",
 			};
 		} else {
 			return {
 				success: false,
-				error: `Error reading file ${filePath}: ${error.message}`,
+				error: "Error reading file " + filePath + ": " + error.message,
 			};
 		}
 	}
@@ -200,7 +201,7 @@ async function writeFileTool(filePath, content, rl) {
 	try {
 		await new Promise((resolve, reject) => {
 			rl.question(
-				`Are you sure you want to write to ${filePath}? (y/n): `,
+				"Are you sure you want to write to " + filePath + "? (y/n): ",
 				(answer) => {
 					if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
 						resolve();
@@ -212,11 +213,11 @@ async function writeFileTool(filePath, content, rl) {
 		});
 
 		await fs.writeFile(filePath, content, 'utf8');
-		return { success: true, output: `File ${filePath} written successfully.` };
+		return { success: true, output: "File " + filePath + " written successfully." };
 	} catch (error) {
 		return {
 			success: false,
-			error: `Error writing file ${filePath}: ${error.message}`,
+			error: "Error writing file " + filePath + ": " + error.message,
 		};
 	}
 }
@@ -239,12 +240,12 @@ async function listDirectoryTool(dirPath, filter = null) {
 		if (error.code === 'ENOENT') {
 			return {
 				success: false,
-				error: `Error listing directory: ${dirPath} not found.`,
+				error: "Error listing directory: " + dirPath + " not found.",
 			};
 		} else {
 			return {
 				success: false,
-				error: `Error listing directory ${dirPath}: ${error.message}`,
+				error: "Error listing directory " + dirPath + ": " + error.message,
 			};
 		}
 	}
@@ -256,21 +257,21 @@ async function runShellCommandTool(command, rl) {
 	}
 	return new Promise((resolve) => {
 		rl.question(
-			`Are you sure you want to run the command: "${command}"? (y/n): `,
+			"Are you sure you want to run the command: \"" + command + "\"? (y/n): ",
 			(answer) => {
 				if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
 					exec(command, (error, stdout, stderr) => {
 						if (error) {
 							resolve({
 								success: false,
-								error: `Command failed: ${error.message}\nStderr: ${stderr}`,
+								error: "Command failed: " + error.message + "\nStderr: " + stderr,
 							});
 							return;
 						}
 						if (stderr) {
 							resolve({
 								success: true,
-								output: `Stderr: ${stderr}\nStdout: ${stdout}`,
+								output: "Stderr: " + stderr + "\nStdout: " + stdout,
 							});
 							return;
 						}
@@ -307,25 +308,25 @@ async function searchFileContentTool(filePath, pattern) {
 				lineEnd === -1 ? content.length : lineEnd
 			);
 			matches.push(
-				`Line ${
-					content.substring(0, match.index).split('\n').length
-				}: ${line.trim()}`
+				"Line " +
+					(content.substring(0, match.index).split('\n').length) +
+				": " + line.trim()
 			);
 		}
 		if (matches.length === 0) {
 			return {
 				success: true,
-				output: `No matches found for pattern '${pattern}' in ${filePath}.`,
+				output: "No matches found for pattern '" + pattern + "' in " + filePath + ".",
 			};
 		}
 		return {
 			success: true,
-			output: `Matches in ${filePath}:\n${matches.join('\n')}`,
+			output: "Matches in " + filePath + ":\n" + matches.join('\n'),
 		};
 	} catch (error) {
 		return {
 			success: false,
-			error: `Error searching file ${filePath}: ${error.message}`,
+			error: "Error searching file " + filePath + ": " + error.message,
 		};
 	}
 }
@@ -338,12 +339,12 @@ async function createDirectoryTool(dirPath) {
 		await fs.mkdir(dirPath, { recursive: true });
 		return {
 			success: true,
-			output: `Directory ${dirPath} created successfully.`,
+			output: "Directory " + dirPath + " created successfully.",
 		};
 	} catch (error) {
 		return {
 			success: false,
-			error: `Error creating directory ${dirPath}: ${error.message}`,
+			error: "Error creating directory " + dirPath + ": " + error.message,
 		};
 	}
 }
@@ -358,7 +359,7 @@ async function replaceInFileTool(filePath, oldString, newString, rl) {
 	try {
 		await new Promise((resolve, reject) => {
 			rl.question(
-				`Are you sure you want to replace in ${filePath}? (y/n): `,
+				"Are you sure you want to replace in " + filePath + "? (y/n): ",
 				(answer) => {
 					if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
 						resolve();
@@ -375,18 +376,18 @@ async function replaceInFileTool(filePath, oldString, newString, rl) {
 		if (content === originalContent) {
 			return {
 				success: true,
-				output: `No occurrences of '${oldString}' found in ${filePath}.`,
+				output: "No occurrences of '" + oldString + "' found in " + filePath + ".",
 			};
 		}
 		await fs.writeFile(filePath, content, 'utf8');
 		return {
 			success: true,
-			output: `Replaced all occurrences of '${oldString}' with '${newString}' in ${filePath}.`,
+			output: "Replaced all occurrences of '" + oldString + "' with '" + newString + "' in " + filePath + ".",
 		};
 	} catch (error) {
 		return {
 			success: false,
-			error: `Error replacing in file ${filePath}: ${error.message}`,
+			error: "Error replacing in file " + filePath + ": " + error.message,
 		};
 	}
 }
@@ -399,55 +400,97 @@ async function testArgsTool(...args) {
 
 async function getProjectContextTool() {
 	let context = {};
-	const projectRoot = process.cwd(); // Get the current working directory
+	const projectRoot = process.cwd();
 
 	try {
-		const packageJsonPath = `${projectRoot}/package.json`;
-		const readmePath = `${projectRoot}/README.md`;
+		const packageJsonPath = projectRoot + '/package.json';
+		const readmePath = projectRoot + '/README.md';
 
-		// Read package.json
 		try {
 			const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
 			context['package.json'] = JSON.parse(packageJsonContent);
 		} catch (error) {
-			context['package.json'] = `Error reading package.json: ${error.message}`;
+			context['package.json'] = "Error reading package.json: " + error.message;
 		}
 
-		// Read README.md
 		try {
 			const readmeContent = await fs.readFile(readmePath, 'utf8');
 			context['README.md'] = readmeContent;
 		} catch (error) {
-			context['README.md'] = `Error reading README.md: ${error.message}`;
+			context['README.md'] = "Error reading README.md: " + error.message;
 		}
 
-		// List top-level directory contents
 		try {
 			const files = await fs.readdir(projectRoot, { withFileTypes: true });
 			const dirContents = files
 				.map((dirent) =>
-					dirent.isDirectory() ? `${dirent.name}/` : dirent.name
+					dirent.isDirectory() ? dirent.name + '/' : dirent.name
 				)
 				.join('\n');
 			context['root_directory_contents'] = dirContents;
 		} catch (error) {
 			context[
 				'root_directory_contents'
-			] = `Error listing root directory: ${error.message}`;
+			] = "Error listing root directory: " + error.message;
 		}
 
 		return { success: true, output: JSON.stringify(context, null, 2) };
 	} catch (error) {
 		return {
 			success: false,
-			error: `Error getting project context: ${error.message}`,
+			error: "Error getting project context: " + error.message,
 		};
 	}
 }
 
-// --- AI Interaction Loop with Tool Use ---
-
-const systemMessage = `You are a helpful AI coding assistant.\n\n**Functionality:**\n- You can use tools to read, write, and list files, run shell commands, and more.\n- For complex tasks, you must create a structured plan to break down the problem.\n- If the user asks to perform a file operation (read, write, summarize, etc.), you should use the corresponding tool.\n\n**Instructions:**\n1.  **Analyze the Request:** Understand the user's goal.\n2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n    *   If a step doesn't require a tool, set "tool": null.\n    *   Use "output_variable": "variable_name" to store the output of a tool for later use.\n    *   Use "iterate_on": "variable_name" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use "\"\${item}\"" in the arguments to refer to the current item.\n3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n4.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n**Tool Definitions:**\n<tool_code>\n// Read a file\nfunction read_file(filePath: string): string;\n\n// Write content to a file\nfunction write_file(filePath: string, content: string): string;\n\n// List contents of a directory\nfunction list_directory(dirPath: string, filter?: string): string;\n\n// Run a shell command\nfunction run_shell_command(command: string): string;\n\n// Search for a pattern within a file's content\nfunction search_file_content(filePath: string, pattern: string): string;\n\n// Create a new directory (recursive)\nfunction create_directory(dirPath: string): string;\n\n// Replace all occurrences of a string in a file\nfunction replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n// Get comprehensive project context (package.json, README.md, root directory contents)\nfunction get_project_context(): string;\n\n// Get the current context\nfunction get_context(): string;\n\n// Update the context with a new key-value pair\nfunction update_context(key: string, value: any): string;\n\n// Summarize a file and add it to the context\nfunction summarize_file(filePath: string): string;\n\n<\/tool_code>`
+const systemMessage = "You are a helpful AI coding assistant.\n\n" +
+"**Functionality:**\n" +
+"- You can use tools to read, write, and list files, run shell commands, and more.\n" +
+"- For complex tasks, you must create a structured plan to break down the problem.\n" +
+"- If a step in a plan fails, you can use self-correction to recover.\n\n" +
+"**Instructions:**\n" +
+"1.  **Analyze the Request:** Understand the user's goal.\n" +
+"2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n" +
+"    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n" +
+"    *   If a step doesn\'t require a tool, set \"tool\": null.\n" +
+"    *   Use \"output_variable\": \"variable_name\" to store the output of a tool for later use.\n" +
+"    *   Use \"iterate_on\": \"variable_name\" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use \"${item}\" in the arguments to refer to the current item.\n" +
+"3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n" +
+"4.  **Error Recovery:** If a step fails, I will provide you with the error and context. You must respond with a JSON object inside a <recovery> block, choosing one of the following strategies:\n" +
+"    *   **Retry:** Retry the same step, optionally with new arguments.\n" +
+"        { \"strategy\": \"retry\", \"args\": [...] }\n" +
+"    *   **Alternative Step:** Provide a new step to replace the failed one.\n" +
+"        { \"strategy\": \"alternative_step\", \"step\": { ... } }\n" +
+"    *   **New Plan:** Provide a completely new plan.\n" +
+"        { \"strategy\": \"new_plan\", \"plan\": { ... } }\n" +
+"    *   **Ask User:** Ask the user for help.\n" +
+"        { \"strategy\": \"ask_user\", \"question\": \"...\" }\n" +
+"5.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n" +
+"**Tool Definitions:**\n" +
+"<tool_code>\n" +
+"// Read a file\n" +
+"function read_file(filePath: string): string;\n\n" +
+"// Write content to a file\n" +
+"function write_file(filePath: string, content: string): string;\n\n" +
+"// List contents of a directory\n" +
+"function list_directory(dirPath: string, filter?: string): string;\n\n" +
+"// Run a shell command\n" +
+"function run_shell_command(command: string): string;\n\n" +
+"// Search for a pattern within a file\'s content\n" +
+"function search_file_content(filePath: string, pattern: string): string;\n\n" +
+"// Create a new directory (recursive)\n" +
+"function create_directory(dirPath: string): string;\n\n" +
+"// Replace all occurrences of a string in a file\n" +
+"function replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n" +
+"// Get comprehensive project context (package.json, README.md, root directory contents)\n" +
+"function get_project_context(): string;\n\n" +
+"// Get the current context\n" +
+"function get_context(): string;\n\n" +
+"// Update the context with a new key-value pair\n" +
+"function update_context(key: string, value: any): string;\n\n" +
+"// Summarize a file and add it to the context\n" +
+"function summarize_file(filePath: string): string;\n\n" +
+"<\/tool_code>";
 
 const HISTORY_FILE = 'conversation_history.json';
 
@@ -457,10 +500,9 @@ async function loadHistory() {
 		return JSON.parse(data);
 	} catch (error) {
 		if (error.code === 'ENOENT') {
-			// File not found, return default messages including system message
 			return [{ role: 'system', content: systemMessage }];
 		} else {
-			console.error(`Error loading conversation history: ${error.message}`);
+			console.error("Error loading conversation history: " + error.message);
 			return [{ role: 'system', content: systemMessage }];
 		}
 	}
@@ -468,16 +510,15 @@ async function loadHistory() {
 
 async function saveHistory(messages) {
 	try {
-		// Filter out the system message before saving, as it's always re-added on load
 		const historyToSave = messages.filter((msg) => msg.role !== 'system');
 		await fs.writeFile(HISTORY_FILE, JSON.stringify(historyToSave, null, 2));
 	} catch (error) {
-		console.error(`Error saving conversation history: ${error.message}`);
+		console.error("Error saving conversation history: " + error.message);
 	}
 }
 
 function parseToolCall(toolCall) {
-	const match = toolCall.match(/(\w+)\((.*)\)/);
+	const match = toolCall.match(/(\w+)\(.*\)/);
 	if (!match) {
 		return null;
 	}
@@ -529,7 +570,7 @@ function validatePlan(plan) {
 		const step = plan.plan[i];
 		if (typeof step.step !== 'number' || typeof step.description !== 'string') {
 			console.error(
-				`Plan validation failed: Step ${i} missing 'step' number or 'description' string.`
+				"Plan validation failed: Step " + i + " missing 'step' number or 'description' string."
 			);
 			return false;
 		}
@@ -537,44 +578,44 @@ function validatePlan(plan) {
 		if (step.tool !== null && step.tool !== undefined) {
 			if (typeof step.tool !== 'string' || !validTools.includes(step.tool)) {
 				console.error(
-					`Plan validation failed: Step ${i} has invalid or unknown tool '${step.tool}'.`
+					"Plan validation failed: Step " + i + " has invalid or unknown tool '" + step.tool + "'."
 				);
 				return false;
 			}
 			if (!Array.isArray(step.args)) {
 				console.error(
-					`Plan validation failed: Step ${i} tool '${step.tool}' missing 'args' array.`
+					"Plan validation failed: Step " + i + " tool '" + step.tool + "' missing 'args' array."
 				);
 				return false;
 			}
 		} else if (step.plan !== null && step.plan !== undefined) {
 			if (!Array.isArray(step.plan)) {
 				console.error(
-					`Plan validation failed: Step ${i} has a 'plan' property that is not an array.`
+					"Plan validation failed: Step " + i + " has a 'plan' property that is not an array."
 				);
 				return false;
 			}
 			if (!validatePlan({ plan: step.plan })) {
-				console.error(`Plan validation failed: Nested plan in step ${i} is invalid.`);
+                console.error("Plan validation failed: Nested plan in step " + i + " is invalid.");
 				return false;
 			}
 		} else {
 			console.error(
-				`Plan validation failed: Step ${i} must have either a 'tool' or a 'plan' property.`
+				"Plan validation failed: Step " + i + " must have either a 'tool' or a 'plan' property."
 			);
 			return false;
 		}
 
 		if (step.output_variable && typeof step.output_variable !== 'string') {
 			console.error(
-				`Plan validation failed: Step ${i} has invalid 'output_variable'.`
+				"Plan validation failed: Step " + i + " has invalid 'output_variable'."
 			);
 			return false;
 		}
 
 		if (step.iterate_on && typeof step.iterate_on !== 'string') {
 			console.error(
-				`Plan validation failed: Step ${i} has invalid 'iterate_on'.`
+				"Plan validation failed: Step " + i + " has invalid 'iterate_on'."
 			);
 			return false;
 		}
@@ -583,31 +624,50 @@ function validatePlan(plan) {
 }
 
 async function handleToolError(failedStep, error, context, messages, rl, contextManager, planState) {
-	console.error(`\n--- Tool Error: Step ${failedStep.step} failed ---`);
-	console.error(`Error: ${error}`);
+    console.error("\n--- Tool Error: Step " + failedStep.step + " failed ---");
+    console.error("Error: " + error);
 
-	const newPrompt = `\nThe following step in the plan failed:\n- Step: ${failedStep.step}\n- Description: ${failedStep.description}\n- Tool: ${failedStep.tool}\n- Arguments: ${JSON.stringify(failedStep.args)}\n\nThe error was:\n${error}\n\nThe current context is:\n${JSON.stringify(context, null, 2)}\n\nThe current plan was:\n${JSON.stringify(planState.currentPlan, null, 2)}\n\nThe current step index was: ${planState.currentStepIndex}\n\nPlease provide a new plan to achieve the original goal, taking this error into account. If you provide a new plan, include it in a <plan> block and specify a "newStepIndex" if you want to restart from a specific step (default is 0).\n`;
+    const newPrompt = "The following step in the plan failed:\n" +
+                     "- Step: " + failedStep.step + "\n" +
+                     "- Description: " + failedStep.description + "\n" +
+                     "- Tool: " + failedStep.tool + "\n" +
+                     "- Arguments: " + JSON.stringify(failedStep.args) + "\n\n" +
+                     "The error was:\n" + error + "\n\n" +
+                     "The current context is:\n" + JSON.stringify(context, null, 2) + "\n\n" +
+                     "The current plan was:\n" + JSON.stringify(planState.currentPlan, null, 2) + "\n\n" +
+                     "The current step index was: " + planState.currentStepIndex + "\n\n" +
+                     "Please choose a strategy to recover from this error. Your response should be a JSON object inside a <recovery> block with one of the following structures:\n\n" +
+                     "1.  **Retry the step (with optional modifications):**\n" +
+                     "    { \"strategy\": \"retry\", \"args\": [...] }\n\n" +
+                     "2.  **Provide an alternative step:**\n" +
+                     "    { \"strategy\": \"alternative_step\", \"step\": { ... } }\n\n" +
+                     "3.  **Provide a new plan:**\n" +
+                     "    { \"strategy\": \"new_plan\", \"plan\": { ... } }\n\n" +
+                     "4.  **Ask the user for help:**\n" +
+                     "    { \"strategy\": \"ask_user\", \"question\": \"...\" }";
 
-	const interactionLog = await processMessage(newPrompt, messages, rl, contextManager, planState);
+    const interactionLog = await processMessage(newPrompt, messages, rl, contextManager, planState);
+    const aiResponse = interactionLog.ai_responses[interactionLog.ai_responses.length - 1];
 
-	const planMatch = interactionLog.ai_responses[interactionLog.ai_responses.length - 1].match(/<plan>([\s\S]*?)<\/plan>/);
-	if (planMatch) {
-		try {
-			const newPlanJson = JSON.parse(planMatch[1].trim());
-			if (validatePlan(newPlanJson)) {
-				return { newPlan: newPlanJson, newStepIndex: newPlanJson.newStepIndex };
-			}
-		} catch (e) {
-			console.error("Error parsing new plan from AI in handleToolError:", e);
-		}
-	}
-	return null; // No new plan provided
+    const recoveryMatch = aiResponse.match(/<recovery>([\s\S]*?)<\/recovery>/);
+    if (recoveryMatch) {
+        try {
+            const recoveryJson = JSON.parse(recoveryMatch[1].trim());
+            console.log("--- Recovery Strategy Received ---");
+            console.log(recoveryJson);
+            return { recovery: recoveryJson };
+        } catch (e) {
+            console.error("Error parsing recovery JSON:", e);
+        }
+    }
+
+    return null;
 }
 
 async function executePlanSteps(planState, context, messages, rl, contextManager, interactionLog) {
     while (planState.currentStepIndex < planState.currentPlan.plan.length) {
         const step = planState.currentPlan.plan[planState.currentStepIndex];
-        console.log(`\n--- Executing Step ${step.step}: ${step.description} ---`);
+        console.log("\n--- Executing Step " + step.step + ": " + step.description + " ---");
 
         if (step.plan) {
             const subPlanState = {
@@ -615,9 +675,9 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
                 currentStepIndex: 0,
                 isPlanExecuting: true,
             };
-            console.log(`\n--- Entering Sub-Plan for Step ${step.step} ---`);
+            console.log("\n--- Entering Sub-Plan for Step " + step.step + " ---");
             await executePlanSteps(subPlanState, context, messages, rl, contextManager, interactionLog);
-            console.log(`\n--- Exiting Sub-Plan for Step ${step.step} ---`);
+            console.log("\n--- Exiting Sub-Plan for Step " + step.step + " ---");
         } else if (step.tool) {
             let itemsToIterate = [];
             if (step.iterate_on) {
@@ -685,7 +745,7 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
                             default:
                                 result = {
                                     success: false,
-                                    error: `Unknown tool: ${tool}`,
+                                    error: "Unknown tool: " + tool,
                                 };
                         }
                     }
@@ -694,21 +754,53 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
                         throw new Error(result.error);
                     }
 
-                    const outputMessage = `<tool_output>${result.output}<\/tool_output>`;
-                    console.log(`--- Tool Output ---\n${result.output}\n-------------------`);
+                    const outputMessage = "<tool_output>" + result.output + "<\/tool_output>";
+                    console.log("--- Tool Output ---\n" + result.output + "\n-------------------");
                     messages.push({ role: 'tool', content: outputMessage });
                     interactionLog.tool_executions.push({
-                        tool_call: `${tool}(${resolvedArgs.join(', ')})`,
+                        tool_call: tool + "(" + resolvedArgs.join(', ') + ")",
                         tool_output: outputMessage,
                     });
 
                     stepOutput.push(result.output);
                 } catch (error) {
-                    const newPlanResult = await handleToolError(step, error.message, context, messages, rl, contextManager, planState);
-                    if (newPlanResult && newPlanResult.newPlan) {
-                        planState.currentPlan = newPlanResult.newPlan;
-                        planState.currentStepIndex = newPlanResult.newStepIndex || 0;
-                        return newPlanResult;
+                    const recoveryResult = await handleToolError(step, error.message, context, messages, rl, contextManager, planState);
+
+                    if (recoveryResult && recoveryResult.recovery) {
+                        const { strategy, ...rest } = recoveryResult.recovery;
+
+                        switch (strategy) {
+                            case 'retry':
+                                console.log("--- Retrying step ---");
+                                if (rest.args) {
+                                    step.args = rest.args;
+                                }
+                                planState.currentStepIndex--;
+                                break;
+                            case 'alternative_step':
+                                console.log("--- Using alternative step ---");
+                                planState.currentPlan.plan[planState.currentStepIndex] = rest.step;
+                                planState.currentStepIndex--;
+                                break;
+                            case 'new_plan':
+                                console.log("--- Using new plan ---");
+                                planState.currentPlan = rest.plan;
+                                planState.currentStepIndex = 0;
+                                break;
+                            case 'ask_user':
+                                console.log("--- Asking user for help ---");
+                                const answer = await new Promise((resolve) => {
+                                    rl.question("AI needs help: " + rest.question + "\nYou: ", (answer) => {
+                                        resolve(answer);
+                                    });
+                                });
+                                const prompt = "The user responded with: \"" + answer + "\". Please use this information to decide on the next step.";
+                                await processMessage(prompt, messages, rl, contextManager, planState);
+                                break;
+                            default:
+                                console.error("Unknown recovery strategy: " + strategy);
+                                throw error;
+                        }
                     } else {
                         throw error;
                     }
@@ -719,7 +811,7 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
                 context[step.output_variable] = stepOutput.length === 1 ? stepOutput[0] : stepOutput;
             }
         } else {
-            console.log(`--- Skipping Step ${step.step}: No tool or nested plan specified. ---`);
+            console.log("--- Skipping Step " + step.step + ": No tool or nested plan specified. ---");
         }
         planState.currentStepIndex++;
     }
@@ -730,7 +822,7 @@ async function logInteraction(interactionLog) {
     try {
         await fs.appendFile('agent_interactions.jsonl', JSON.stringify(interactionLog) + '\n');
     } catch (error) {
-        console.error(`Error logging interaction: ${error.message}`);
+        console.error("Error logging interaction: " + error.message);
     }
 }
 
@@ -762,7 +854,7 @@ async function chatWithAI(initialPrompt = null) {
 		rl.close();
 		process.exit(0);
 	} else {
-		console.log(`\n--- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n`);
+		console.log("\n--- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n");
 		rl.prompt();
 	}
 

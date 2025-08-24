@@ -36,8 +36,8 @@ A component within `cli.js` acts as the plan execution engine, responsible for:
     *   Validating `output_variable` and `iterate_on` fields if present.
     *   If validation fails, an error is logged, and a message is sent back to the AI, prompting it to correct the plan.
 
-### 5. Self-Correction (Initial Implementation)
-*   **Implemented:** The agent can now handle errors during plan execution. When a tool fails, the agent is prompted to create a new plan to recover from the error. This is achieved through the `handleToolError` function, which provides the AI with the context of the failure and asks for a new plan.
+### 5. Advanced Self-Correction
+*   **Implemented:** The agent can now handle errors during plan execution. When a tool fails, the agent can choose between several recovery strategies: retrying the step (with or without modified arguments), proposing an alternative step, creating a new plan, or asking the user for help. This is achieved through the `handleToolError` function, which provides the AI with the context of the failure and asks for a recovery strategy.
 
 ### 6. Sophisticated Context Management
 *   **Implemented:** A new `ContextManager` class has been introduced to provide a persistent and structured context for the AI. The context is now stored in a `context.json` file and can be loaded, saved, and updated across different sessions.
@@ -61,7 +61,7 @@ A component within `cli.js` acts as the plan execution engine, responsible for:
 ### Core Agent Capabilities
 
 
-*   **Advanced Self-Correction:** The current implementation can create a new plan on failure. However, more advanced self-correction, such as intelligently retrying a failed step with modified arguments or adjusting the strategy without a full re-plan, is not yet implemented.
+
 *   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
 *   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
 
