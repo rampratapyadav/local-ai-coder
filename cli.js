@@ -6,6 +6,7 @@ import { exec } from 'child_process';
 import readline from 'readline';
 import ContextManager from './contextManager.js';
 import ollama from 'ollama';
+import { resolveArguments } from './argumentParser.js';
 
 async function processMessage(userMessage, messages, rl, contextManager, planState) {
     const interactionLog = {
@@ -390,6 +391,12 @@ async function replaceInFileTool(filePath, oldString, newString, rl) {
 	}
 }
 
+async function testArgsTool(...args) {
+    console.log('--- test_args tool called with: ---');
+    console.log(args);
+    return { success: true, output: JSON.stringify(args, null, 2) };
+}
+
 async function getProjectContextTool() {
 	let context = {};
 	const projectRoot = process.cwd(); // Get the current working directory
@@ -515,6 +522,7 @@ function validatePlan(plan) {
 		'get_context',
 		'update_context',
 		'summarize_file',
+		'test_args',
 	];
 
 	for (let i = 0; i < plan.plan.length; i++) {
@@ -628,19 +636,11 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
                 let result;
                 try {
                     const { tool, args } = step;
-                    let resolvedArgs = args.map((arg) => {
-                        if (typeof arg === 'string') {
-                            if (arg === '${item}') {
-                                return item;
-                            }
-                            const varMatch = arg.match(/^\$\{(.*)\}$/);
-                            if (varMatch) {
-                                const varName = varMatch[1];
-                                return context[varName] || arg;
-                            }
-                        }
-                        return arg;
-                    });
+                    const stepContext = { ...context };
+                    if (item) {
+						stepContext.item = item;
+					}
+					const resolvedArgs = resolveArguments(args, stepContext);
 
                     if (tool === 'list_directory' && resolvedArgs.length > 1) {
                         result = await listDirectoryTool(resolvedArgs[0], resolvedArgs[1]);
@@ -678,6 +678,9 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
                                 break;
                             case 'summarize_file':
                                 result = await summarizeFileTool(contextManager, resolvedArgs[0]);
+                                break;
+                            case 'test_args':
+                                result = await testArgsTool(...resolvedArgs);
                                 break;
                             default:
                                 result = {

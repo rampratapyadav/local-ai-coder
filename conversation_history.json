@@ -482,5 +482,13 @@
   {
     "role": "assistant",
     "content": "\nHere is a summary of the Local AI Coder project, including only the important files:\n\n* `package.json`: This file contains metadata about the project, such as its name and version number. It also includes information about the dependencies needed to run the project.\n* `README.md`: This file contains a brief overview of the project, including instructions for how to install and use it.\n* `main.py`: This is the main entry point of the project, where the code that runs the application is located.\n* `models/`: This directory contains files related to the machine learning models used by the application.\n* `train.py`: This file contains code for training the machine learning models used by the application.\n* `predict.py`: This file contains code for making predictions using the trained machine learning models.\n* `data/`: This directory contains files related to the data used by the application, such as datasets and pre-trained models.\n* `utils.py`: This file contains utility functions that are used throughout the project."
+  },
+  {
+    "role": "user",
+    "content": "<plan>    2     {    3       \"plan\": [    4         {    5           \"step\": 1,    6           \"description\": \"Start the process of listing directory contents.\",    7           \"tool\": null,    8           \"args\": []    9         },   10         {   11           \"step\": 2,   12           \"description\": \"Execute a nested plan to list the contents of 'test_dir'.\",   13           \"plan\": [   14             {   15               \"step\": 2.1,   16               \"description\": \"List files in test_dir.\",   17               \"tool\": \"list_directory\",   18               \"args\": [\"test_dir\"]   19             }   20           ]   21         },   22         {   23           \"step\": 3,   24           \"description\": \"Finished listing directory contents.\",   25           \"tool\": null,   26           \"args\": []   27         }   28       ]   29     }   30     </plan>"
+  },
+  {
+    "role": "assistant",
+    "content": "\nHere is a summary of the plan:\n\n* Step 1: Start the process of listing directory contents.\n* Step 2: Execute a nested plan to list the contents of 'test_dir'.\n\t+ Step 2.1: List files in test_dir.\n* Step 3: Finished listing directory contents.\n\nNote that this is just a summary of the plan, and the actual code will contain more detailed information about each step, such as the commands to be executed and any additional arguments or options that may be needed."
   }
 ]

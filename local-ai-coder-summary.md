@@ -65,43 +65,29 @@ local AI coder. To recap, we now have:
     *   **Advanced Agentic Features (Partial Implementation):**
         *   **Structured Planning:** Parses and executes AI-generated JSON plans within `<plan>` blocks.
         *   **Plan Execution Engine:** Iterates through plan steps, executes tools, supports `output_variable` for context, and `iterate_on` for processing lists.
-        *   **Argument Resolution:** Resolves placeholders like `${item}` and `${variable_name}` in tool arguments.
+        *   **Advanced Argument Resolution:** Resolves placeholders like `${item}` and `${variable_name}` in tool arguments. The new parser can handle nested objects and arrays, and resolve variables from the context.
 
 ### Pending/Future Scope:
 
-1.  **"Self-Learning" (Fine-tuning):**
-    *   **Data Formatting Script:** **Implemented** (`data_formatter.py` transforms `agent_interactions.jsonl` into `formatted_data.jsonl` for fine-tuning).
-    *   **Fine-tuning Process:** **Outlined** (`fine_tune_model.py` provides a conceptual script for fine-tuning using Hugging Face `transformers` and `PEFT`. Actual execution requires manual setup and significant computational resources).
-    *   **Deployment of Fine-tuned Model:** **Outlined** (Steps to integrate a fine-tuned model with Ollama, including merging adapters, converting to GGUF, creating a Modelfile, and importing the model).
+### Core Agent Capabilities
 
-    ### Testing the Data Formatting Script
-    To test the `data_formatter.py` module:
-    1.  **Generate Interaction Data:** Use the CLI agent (`local-ai-coder`) to interact with the AI and generate some `agent_interactions.jsonl` content.
-    2.  **Run the Formatting Script:** Execute `python3 data_formatter.py` from your project root.
-    3.  **Verify Output:** Inspect the `formatted_data.jsonl` file to ensure the data is correctly structured for fine-tuning. Each line should be a JSON object with a `messages` array, containing `user` and `assistant` roles, with tool calls and outputs embedded in the assistant's content.
+*   **Fine-Tuning Pipeline:** While the data formatting script (`data_formatter.py`) exists, the core process of actually fine-tuning the model (`fine_tune_model.py`) and deploying the tuned model back into Ollama is still pending.
+*   **Advanced Self-Correction:** The current implementation can create a new plan on failure. However, more advanced self-correction, such as intelligently retrying a failed step with modified arguments or adjusting the strategy without a full re-plan, is not yet implemented.
+*   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
+*   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
 
-2.  **Enhance Tool Use (Further Robustness & Features):**
-    *   **More Robust Tool Parsing:** Current parsing is regex-based; could be improved for complex arguments or multiple tool calls in a single AI response more reliably.
-    *   **Comprehensive Error Handling:** Enhance error handling in `processMessage` for AI interaction and tool execution failures.
-    *   **Argument Validation:** More comprehensive type/format validation for tool arguments.
+### Tooling and Robustness
 
-3.  **Advanced Agentic Features (Further Development):**
-    *   **Self-Correction:** Implement logic for the AI to identify and correct its own mistakes or failed tool executions during plan execution.
-    *   **More Sophisticated Context Management:** Develop broader, persistent, or dynamically updated project context for the AI to reason about.
-    *   **Deeper Planning & Reasoning Integration:** Allow the AI more control over execution flow, including dynamic plan modification.
+*   **Robust Tool Parsing:** The `parseToolCall` function in `cli.js` is still regex-based and could be improved to more reliably handle complex arguments or multiple tool calls.
+*   **Comprehensive Error Handling:** The main `processMessage` loop could have more robust error handling for AI interaction and tool execution failures.
+*   **Argument Validation:** The tools themselves could have more comprehensive validation for the types and formats of the arguments they receive.
 
-4.  **Project Context Awareness:**
-    *   Implement mechanisms for the AI to automatically understand the project's structure, dependencies (e.g., by reading `package.json`, `requirements.txt`), and existing code without explicit prompts.
+### User Experience
 
-5.  **User Experience (UI/UX) Improvements:**
-    *   **Web GUI:**
-        *   Implement cross-session conversation history persistence.
-        *   Implement code highlighting within rendered Markdown.
-        *   Consider how to display tool outputs more effectively if the web UI were to interact with the agent directly.
-        *   Add more interactive elements.
-    *   **CLI:** Improved formatting of tool outputs, progress indicators for long-running commands.
+*   **Web GUI Enhancements:** The web interface is still missing several key features, including cross-session conversation history, code highlighting for rendered markdown, and a more effective way to display tool outputs.
+*   **CLI Enhancements:** The command-line interface could be improved with better formatting for tool outputs and progress indicators for long-running commands.
 
-6.  **Packaging & Distribution:**
-    *   Set up a proper `npm publish` process for the CLI.
-    *   Consider creating a standalone executable.
+### Packaging and Distribution
+
+*   The project is not yet set up for easy distribution. This includes creating a proper npm package for the CLI and considering a standalone executable.
 
