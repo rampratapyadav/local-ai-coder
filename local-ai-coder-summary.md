@@ -67,11 +67,17 @@ local AI coder. To recap, we now have:
         *   **Plan Execution Engine:** Iterates through plan steps, executes tools, supports `output_variable` for context, and `iterate_on` for processing lists.
         *   **Advanced Argument Resolution:** Resolves placeholders like `${item}` and `${variable_name}` in tool arguments. The new parser can handle nested objects and arrays, and resolve variables from the context.
 
+4.  **Fine-Tuning Pipeline:**
+    *   **Data Formatting:** `data_formatter.py` script to transform `agent_interactions.jsonl` into a format suitable for fine-tuning.
+    *   **Fine-Tuning Script:** `fine_tune_model.py` script to fine-tune the `codellama` model using LoRA.
+    *   **Merge and Export Script:** `merge_and_export.py` script to merge the trained LoRA adapters with the base model.
+    *   **Deployment Instructions:** The process for converting the model to GGUF and running it in Ollama is documented.
+
 ### Pending/Future Scope:
 
 ### Core Agent Capabilities
 
-*   **Fine-Tuning Pipeline:** While the data formatting script (`data_formatter.py`) exists, the core process of actually fine-tuning the model (`fine_tune_model.py`) and deploying the tuned model back into Ollama is still pending.
+
 *   **Advanced Self-Correction:** The current implementation can create a new plan on failure. However, more advanced self-correction, such as intelligently retrying a failed step with modified arguments or adjusting the strategy without a full re-plan, is not yet implemented.
 *   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
 *   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.

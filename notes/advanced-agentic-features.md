@@ -50,11 +50,17 @@ A component within `cli.js` acts as the plan execution engine, responsible for:
 *   **Proactive Plan Modification:** The agent can proactively suggest and implement plan modifications based on new information or internal reasoning, beyond just error recovery. This is primarily handled by the `handleToolError` function which allows the AI to provide a new plan upon failure.
 *   **Hierarchical Planning/Sub-plans:** The agent supports nested plans or sub-plans, allowing the AI to break down and manage more complex problems. This is implemented in the `executePlanSteps` function which recursively calls itself for nested plans.
 
+### 8. Fine-Tuning Pipeline
+*   **Data Formatting:** `data_formatter.py` script to transform `agent_interactions.jsonl` into a format suitable for fine-tuning.
+*   **Fine-Tuning Script:** `fine_tune_model.py` script to fine-tune the `codellama` model using LoRA.
+*   **Merge and Export Script:** `merge_and_export.py` script to merge the trained LoRA adapters with the base model.
+*   **Deployment Instructions:** The process for converting the model to GGUF and running it in Ollama is documented.
+
 ## Pending/Future Scope:
 
 ### Core Agent Capabilities
 
-*   **Fine-Tuning Pipeline:** While the data formatting script (`data_formatter.py`) exists, the core process of actually fine-tuning the model (`fine_tune_model.py`) and deploying the tuned model back into Ollama is still pending.
+
 *   **Advanced Self-Correction:** The current implementation can create a new plan on failure. However, more advanced self-correction, such as intelligently retrying a failed step with modified arguments or adjusting the strategy without a full re-plan, is not yet implemented.
 *   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
 *   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
