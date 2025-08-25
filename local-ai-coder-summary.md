@@ -66,6 +66,8 @@ local AI coder. To recap, we now have:
         *   **Structured Planning:** Parses and executes AI-generated JSON plans within `<plan>` blocks.
         *   **Plan Execution Engine:** Iterates through plan steps, executes tools, supports `output_variable` for context, and `iterate_on` for processing lists.
         *   **Advanced Argument Resolution:** Resolves placeholders like `${item}` and `${variable_name}` in tool arguments. The new parser can handle nested objects and arrays, and resolve variables from the context.
+        *   **Robust Tool Parsing:** The `parseToolCall` function in `cli.js` has been updated to reliably handle complex arguments, including quoted strings, commas, and escaped characters.
+        *   **Argument Validation:** Comprehensive validation has been added to tool arguments in `cli.js` to ensure correct types and formats, improving robustness.
 
 4.  **Fine-Tuning Pipeline:**
     *   **Data Formatting:** `data_formatter.py` script to transform `agent_interactions.jsonl` into a format suitable for fine-tuning.
@@ -87,9 +89,9 @@ local AI coder. To recap, we now have:
 
 ### Tooling and Robustness
 
-*   **Robust Tool Parsing:** The `parseToolCall` function in `cli.js` is still regex-based and could be improved to more reliably handle complex arguments or multiple tool calls.
+
 *   **Comprehensive Error Handling:** The main `processMessage` loop could have more robust error handling for AI interaction and tool execution failures.
-*   **Argument Validation:** The tools themselves could have more comprehensive validation for the types and formats of the arguments they receive.
+
 
 ### User Experience
 

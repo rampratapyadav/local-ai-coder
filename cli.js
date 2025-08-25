@@ -1,12 +1,34 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { promises as fs } from 'fs';
-import { exec } from 'child_process';
 import readline from 'readline';
+import chalk from 'chalk';
+import ora from 'ora';
 import ContextManager from './contextManager.js';
 import ollama from 'ollama';
+import { promises as fs } from 'fs';
 import { resolveArguments } from './argumentParser.js';
+import {
+    readFileTool,
+    writeFileTool,
+    listDirectoryTool,
+    runShellCommandTool,
+    searchFileContentTool,
+    createDirectoryTool,
+    replaceInFileTool,
+    searchAndReplaceInFileTool,
+    getFileMetadataTool,
+    gitDiffTool,
+    gitBlameTool,
+    getProjectContextTool,
+    getAvailableTools,
+    getContextTool,
+    updateContextTool,
+    summarizeFileTool,
+    testArgsTool,
+} from './tools.js';
+
+const systemMessage = `You are a helpful AI assistant that can use tools to interact with the user's system.`;
 
 async function processMessage(userMessage, messages, rl, contextManager, planState) {
     const interactionLog = {
@@ -26,6 +48,7 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
         });
     }
 
+    const spinner = ora('Thinking...').start();
     try {
         const response = await ollama.chat({
             model: 'codellama',
@@ -34,6 +57,7 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
         });
 
         let aiResponseContent = '';
+        spinner.stop();
         for await (const chunk of response) {
             aiResponseContent += chunk.message.content;
             process.stdout.write(chunk.message.content);
@@ -71,6 +95,7 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
             if (parsedTool) {
                 console.log("\n--- Executing Tool: " + parsedTool.toolName + "(" + parsedTool.args.join(', ') + ") ---");
                 let result;
+                const spinner = ora(`Executing ${parsedTool.toolName}...`).start();
                 try {
                     switch (parsedTool.toolName) {
                         case 'read_file':
@@ -92,10 +117,25 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
                             result = await createDirectoryTool(parsedTool.args[0]);
                             break;
                         case 'replace_in_file':
-                            result = await replaceInFileTool(parsedTool.args[0], parsedTool.args[1], parsedTool.args[2], rl);
+                            result = await replaceInFileTool(parsedTool.args[0], parsedTool.args[1], parsedTool.args[2], parsedTool.args[3], rl);
+                            break;
+                        case 'search_and_replace_in_file':
+                            result = await searchAndReplaceInFileTool(parsedTool.args[0], parsedTool.args[1], parsedTool.args[2], rl);
+                            break;
+                        case 'get_file_metadata':
+                            result = await getFileMetadataTool(parsedTool.args[0]);
+                            break;
+                        case 'git_diff':
+                            result = await gitDiffTool(parsedTool.args[0]);
+                            break;
+                        case 'git_blame':
+                            result = await gitBlameTool(parsedTool.args[0]);
                             break;
                         case 'get_project_context':
                             result = await getProjectContextTool();
+                            break;
+                        case 'get_available_tools':
+                            result = await getAvailableTools();
                             break;
                         case 'get_context':
                             result = await getContextTool(contextManager);
@@ -112,17 +152,24 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
                         default:
                             result = { success: false, error: "Unknown tool: " + parsedTool.toolName };
                     }
+                    spinner.stop();
 
                     if (result.success) {
                         const outputMessage = "<tool_output>" + result.output + "<\/tool_output>";
-                        console.log("--- Tool Output ---\n" + result.output + "\n-------------------");
+                        if (parsedTool.toolName === 'get_file_metadata') {
+                            console.log(chalk.green('--- Tool Output ---'));
+                            console.table(result.output);
+                            console.log(chalk.green('-------------------'));
+                        } else {
+                            console.log(chalk.green('--- Tool Output ---\n') + chalk.blue(result.output) + chalk.green('\n-------------------'));
+                        }
                         messages.push({ role: 'tool', content: outputMessage });
                         interactionLog.tool_executions.push({
                             tool_call: toolCallCode,
                             tool_output: outputMessage,
                         });
                     } else {
-                        console.error("--- Tool Error ---\n" + result.error + "\n-------------------");
+                        console.error(chalk.red("--- Tool Error ---\n" + result.error + "\n-------------------"));
                         messages.push({ role: 'tool', content: "<tool_error>" + result.error + "<\/tool_error>" });
                         interactionLog.tool_executions.push({
                             tool_call: toolCallCode,
@@ -152,8 +199,7 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
             }
         }
     } catch (error) {
-        console.error('Error communicating with Ollama:', error);
-        messages.push({ role: 'system', content: "Error communicating with Ollama: " + error.message });
+        await handleError(error, messages, rl, contextManager, planState);
     }
     return interactionLog;
 }
@@ -166,331 +212,6 @@ program
 		'CLI for your local AI coding assistant powered by Ollama with tool use and interactive sessions'
 	)
 	.version('1.0.0');
-
-// --- Tool Definitions ---
-
-async function readFileTool(filePath) {
-	if (!filePath) {
-		return { success: false, error: 'Error: a file path must be provided.' };
-	}
-	try {
-		const content = await fs.readFile(filePath, 'utf8');
-		return { success: true, output: content };
-	} catch (error) {
-		if (error.code === 'ENOENT') {
-			return {
-				success: false,
-				error: "Error reading file: " + filePath + " not found.",
-			};
-		} else {
-			return {
-				success: false,
-				error: "Error reading file " + filePath + ": " + error.message,
-			};
-		}
-	}
-}
-
-async function writeFileTool(filePath, content, rl) {
-	if (!filePath || !content) {
-		return {
-			success: false,
-			error: 'Error: a file path and content must be provided.',
-		};
-	}
-	try {
-		await new Promise((resolve, reject) => {
-			rl.question(
-				"Are you sure you want to write to " + filePath + "? (y/n): ",
-				(answer) => {
-					if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
-						resolve();
-					} else {
-						reject(new Error('Write operation cancelled by user.'));
-					}
-				}
-			);
-		});
-
-		await fs.writeFile(filePath, content, 'utf8');
-		return { success: true, output: "File " + filePath + " written successfully." };
-	} catch (error) {
-		return {
-			success: false,
-			error: "Error writing file " + filePath + ": " + error.message,
-		};
-	}
-}
-
-async function listDirectoryTool(dirPath, filter = null) {
-	if (!dirPath) {
-		return {
-			success: false,
-			error: 'Error: a directory path must be provided.',
-		};
-	}
-	try {
-		let files = await fs.readdir(dirPath);
-		if (filter) {
-			const regex = new RegExp(filter);
-			files = files.filter((file) => regex.test(file));
-		}
-		return { success: true, output: files.join('\n') };
-	} catch (error) {
-		if (error.code === 'ENOENT') {
-			return {
-				success: false,
-				error: "Error listing directory: " + dirPath + " not found.",
-			};
-		} else {
-			return {
-				success: false,
-				error: "Error listing directory " + dirPath + ": " + error.message,
-			};
-		}
-	}
-}
-
-async function runShellCommandTool(command, rl) {
-	if (!command) {
-		return { success: false, error: 'Error: a command must be provided.' };
-	}
-	return new Promise((resolve) => {
-		rl.question(
-			"Are you sure you want to run the command: \"" + command + "\"? (y/n): ",
-			(answer) => {
-				if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
-					exec(command, (error, stdout, stderr) => {
-						if (error) {
-							resolve({
-								success: false,
-								error: "Command failed: " + error.message + "\nStderr: " + stderr,
-							});
-							return;
-						}
-						if (stderr) {
-							resolve({
-								success: true,
-								output: "Stderr: " + stderr + "\nStdout: " + stdout,
-							});
-							return;
-						}
-						resolve({ success: true, output: stdout });
-					});
-				} else {
-					resolve({
-						success: false,
-						error: 'Command execution cancelled by user.',
-					});
-				}
-			}
-		);
-	});
-}
-
-async function searchFileContentTool(filePath, pattern) {
-	if (!filePath || !pattern) {
-		return {
-			success: false,
-			error: 'Error: a file path and pattern must be provided.',
-		};
-	}
-	try {
-		const content = await fs.readFile(filePath, 'utf8');
-		const regex = new RegExp(pattern, 'g');
-		const matches = [];
-		let match;
-		while ((match = regex.exec(content)) !== null) {
-			const lineStart = content.lastIndexOf('\n', match.index) + 1;
-			const lineEnd = content.indexOf('\n', match.index);
-			const line = content.substring(
-				lineStart,
-				lineEnd === -1 ? content.length : lineEnd
-			);
-			matches.push(
-				"Line " +
-					(content.substring(0, match.index).split('\n').length) +
-				": " + line.trim()
-			);
-		}
-		if (matches.length === 0) {
-			return {
-				success: true,
-				output: "No matches found for pattern '" + pattern + "' in " + filePath + ".",
-			};
-		}
-		return {
-			success: true,
-			output: "Matches in " + filePath + ":\n" + matches.join('\n'),
-		};
-	} catch (error) {
-		return {
-			success: false,
-			error: "Error searching file " + filePath + ": " + error.message,
-		};
-	}
-}
-
-async function createDirectoryTool(dirPath) {
-	if (!dirPath) {
-		return { success: false, error: 'Error: a directory path must be provided.' };
-	}
-	try {
-		await fs.mkdir(dirPath, { recursive: true });
-		return {
-			success: true,
-			output: "Directory " + dirPath + " created successfully.",
-		};
-	} catch (error) {
-		return {
-			success: false,
-			error: "Error creating directory " + dirPath + ": " + error.message,
-		};
-	}
-}
-
-async function replaceInFileTool(filePath, oldString, newString, rl) {
-	if (!filePath || !oldString || !newString) {
-		return {
-			success: false,
-			error: 'Error: a file path, old string, and new string must be provided.',
-		};
-	}
-	try {
-		await new Promise((resolve, reject) => {
-			rl.question(
-				"Are you sure you want to replace in " + filePath + "? (y/n): ",
-				(answer) => {
-					if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
-						resolve();
-					} else {
-						reject(new Error('Replace operation cancelled by user.'));
-					}
-				}
-			);
-		});
-
-		let content = await fs.readFile(filePath, 'utf8');
-		const originalContent = content;
-		content = content.replace(new RegExp(oldString, 'g'), newString);
-		if (content === originalContent) {
-			return {
-				success: true,
-				output: "No occurrences of '" + oldString + "' found in " + filePath + ".",
-			};
-		}
-		await fs.writeFile(filePath, content, 'utf8');
-		return {
-			success: true,
-			output: "Replaced all occurrences of '" + oldString + "' with '" + newString + "' in " + filePath + ".",
-		};
-	} catch (error) {
-		return {
-			success: false,
-			error: "Error replacing in file " + filePath + ": " + error.message,
-		};
-	}
-}
-
-async function testArgsTool(...args) {
-    console.log('--- test_args tool called with: ---');
-    console.log(args);
-    return { success: true, output: JSON.stringify(args, null, 2) };
-}
-
-async function getProjectContextTool() {
-	let context = {};
-	const projectRoot = process.cwd();
-
-	try {
-		const packageJsonPath = projectRoot + '/package.json';
-		const readmePath = projectRoot + '/README.md';
-
-		try {
-			const packageJsonContent = await fs.readFile(packageJsonPath, 'utf8');
-			context['package.json'] = JSON.parse(packageJsonContent);
-		} catch (error) {
-			context['package.json'] = "Error reading package.json: " + error.message;
-		}
-
-		try {
-			const readmeContent = await fs.readFile(readmePath, 'utf8');
-			context['README.md'] = readmeContent;
-		} catch (error) {
-			context['README.md'] = "Error reading README.md: " + error.message;
-		}
-
-		try {
-			const files = await fs.readdir(projectRoot, { withFileTypes: true });
-			const dirContents = files
-				.map((dirent) =>
-					dirent.isDirectory() ? dirent.name + '/' : dirent.name
-				)
-				.join('\n');
-			context['root_directory_contents'] = dirContents;
-		} catch (error) {
-			context[
-				'root_directory_contents'
-			] = "Error listing root directory: " + error.message;
-		}
-
-		return { success: true, output: JSON.stringify(context, null, 2) };
-	} catch (error) {
-		return {
-			success: false,
-			error: "Error getting project context: " + error.message,
-		};
-	}
-}
-
-const systemMessage = "You are a helpful AI coding assistant.\n\n" +
-"**Functionality:**\n" +
-"- You can use tools to read, write, and list files, run shell commands, and more.\n" +
-"- For complex tasks, you must create a structured plan to break down the problem.\n" +
-"- If a step in a plan fails, you can use self-correction to recover.\n\n" +
-"**Instructions:**\n" +
-"1.  **Analyze the Request:** Understand the user's goal.\n" +
-"2.  **Create a Plan:** If the task requires multiple steps or tools, respond with a JSON object inside a <plan> block.\n" +
-"    *   The plan should be a list of steps, each with a description, a tool to use, and arguments.\n" +
-"    *   If a step doesn\'t require a tool, set \"tool\": null.\n" +
-"    *   Use \"output_variable\": \"variable_name\" to store the output of a tool for later use.\n" +
-"    *   Use \"iterate_on\": \"variable_name\" to indicate that the step should be executed for each item in the specified variable (which should be an array). When iterating, use \"${item}\" in the arguments to refer to the current item.\n" +
-"3.  **Execute the Plan:** I will execute the plan step by step and provide the output for each tool.\n" +
-"4.  **Error Recovery:** If a step fails, I will provide you with the error and context. You must respond with a JSON object inside a <recovery> block, choosing one of the following strategies:\n" +
-"    *   **Retry:** Retry the same step, optionally with new arguments.\n" +
-"        { \"strategy\": \"retry\", \"args\": [...] }\n" +
-"    *   **Alternative Step:** Provide a new step to replace the failed one.\n" +
-"        { \"strategy\": \"alternative_step\", \"step\": { ... } }\n" +
-"    *   **New Plan:** Provide a completely new plan.\n" +
-"        { \"strategy\": \"new_plan\", \"plan\": { ... } }\n" +
-"    *   **Ask User:** Ask the user for help.\n" +
-"        { \"strategy\": \"ask_user\", \"question\": \"...\" }\n" +
-"5.  **Respond:** Once the plan is complete or if no plan is needed, provide a final answer.\n\n" +
-"**Tool Definitions:**\n" +
-"<tool_code>\n" +
-"// Read a file\n" +
-"function read_file(filePath: string): string;\n\n" +
-"// Write content to a file\n" +
-"function write_file(filePath: string, content: string): string;\n\n" +
-"// List contents of a directory\n" +
-"function list_directory(dirPath: string, filter?: string): string;\n\n" +
-"// Run a shell command\n" +
-"function run_shell_command(command: string): string;\n\n" +
-"// Search for a pattern within a file\'s content\n" +
-"function search_file_content(filePath: string, pattern: string): string;\n\n" +
-"// Create a new directory (recursive)\n" +
-"function create_directory(dirPath: string): string;\n\n" +
-"// Replace all occurrences of a string in a file\n" +
-"function replace_in_file(filePath: string, oldString: string, newString: string): string;\n\n" +
-"// Get comprehensive project context (package.json, README.md, root directory contents)\n" +
-"function get_project_context(): string;\n\n" +
-"// Get the current context\n" +
-"function get_context(): string;\n\n" +
-"// Update the context with a new key-value pair\n" +
-"function update_context(key: string, value: any): string;\n\n" +
-"// Summarize a file and add it to the context\n" +
-"function summarize_file(filePath: string): string;\n\n" +
-"<\/tool_code>";
 
 const HISTORY_FILE = 'conversation_history.json';
 
@@ -517,30 +238,74 @@ async function saveHistory(messages) {
 	}
 }
 
-function parseToolCall(toolCall) {
-	const match = toolCall.match(/(\w+)\(.*\)/);
-	if (!match) {
-		return null;
-	}
+export function parseToolCall(toolCall) {
+    const match = toolCall.match(/^(\w+)\((\S*)\)$/);
+    if (!match) {
+        return null;
+    }
 
-	const toolName = match[1];
-	const argsString = match[2];
+    const toolName = match[1];
+    const argsString = match[2];
+    const args = [];
+    let currentArg = '';
+    let inString = false;
+    let quoteChar = '';
+    let parenLevel = 0;
 
-	const args = [];
-	const argRegex = /(?:'([^']*)'|"([^"]*)"|([^,]+))/g;
-	let argMatch;
+    for (let i = 0; i < argsString.length; i++) {
+        const char = argsString[i];
 
-	while ((argMatch = argRegex.exec(argsString)) !== null) {
-		if (argMatch[1] !== undefined) {
-			args.push(argMatch[1]);
-		} else if (argMatch[2] !== undefined) {
-			args.push(argMatch[2]);
-		} else if (argMatch[3] !== undefined) {
-			args.push(argMatch[3].trim());
-		}
-	}
+        if (inString) {
+            if (char === '\\') { // Handle escaped characters
+                if (i + 1 < argsString.length && (argsString[i+1] === '\'' || argsString[i+1] === '"')) {
+                    currentArg += argsString[i+1]; // Add the escaped quote
+                    i++; // Skip the next character (the escaped quote)
+                } else {
+                    currentArg += char; // Not an escaped quote, just add the backslash
+                }
+            } else if (char === quoteChar) {
+                inString = false;
+                currentArg += char; // Add the closing quote
+            } else {
+                currentArg += char;
+            }
+        } else {
+            switch (char) {
+                case '\'':
+                case '"':
+                    inString = true;
+                    quoteChar = char;
+                    currentArg += char;
+                    break;
+                case '(':{
+                    parenLevel++;
+                    currentArg += char;
+                    break;
+                }
+                case ')':{
+                    parenLevel--;
+                    currentArg += char;
+                    break;
+                }
+                case ',':
+                    if (parenLevel === 0) {
+                        args.push(currentArg.trim());
+                        currentArg = '';
+                    } else {
+                        currentArg += char;
+                    }
+                    break;
+                default:
+                    currentArg += char;
+            }
+        }
+    }
 
-	return { toolName, args };
+    if (currentArg.trim() !== '') {
+        args.push(currentArg.trim());
+    }
+
+    return { toolName, args };
 }
 
 function validatePlan(plan) {
@@ -559,6 +324,10 @@ function validatePlan(plan) {
 		'search_file_content',
 		'create_directory',
 		'replace_in_file',
+		'search_and_replace_in_file',
+		'getFileMetadata',
+		'git_diff',
+		'git_blame',
 		'get_project_context',
 		'get_context',
 		'update_context',
@@ -694,6 +463,7 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
             let stepOutput = [];
             for (const item of itemsToIterate) {
                 let result;
+                const spinner = ora(`Executing ${tool}...`).start();
                 try {
                     const { tool, args } = step;
                     const stepContext = { ...context };
@@ -702,60 +472,78 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
 					}
 					const resolvedArgs = resolveArguments(args, stepContext);
 
-                    if (tool === 'list_directory' && resolvedArgs.length > 1) {
-                        result = await listDirectoryTool(resolvedArgs[0], resolvedArgs[1]);
-                    } else {
-                        switch (tool) {
-                            case 'read_file':
-                                result = await readFileTool(resolvedArgs[0]);
-                                break;
-                            case 'write_file':
-                                result = await writeFileTool(resolvedArgs[0], resolvedArgs[1], rl);
-                                break;
-                            case 'list_directory':
-                                result = await listDirectoryTool(resolvedArgs[0]);
-                                break;
-                            case 'run_shell_command':
-                                result = await runShellCommandTool(resolvedArgs[0], rl);
-                                break;
-                            case 'search_file_content':
-                                result = await searchFileContentTool(resolvedArgs[0], resolvedArgs[1]);
-                                break;
-                            case 'create_directory':
-                                result = await createDirectoryTool(resolvedArgs[0]);
-                                break;
-                            case 'replace_in_file':
-                                result = await replaceInFileTool(resolvedArgs[0], resolvedArgs[1], resolvedArgs[2], rl);
-                                break;
-                            case 'get_project_context':
-                                result = await getProjectContextTool();
-                                break;
-                            case 'get_context':
-                                result = await getContextTool(contextManager);
-                                break;
-                            case 'update_context':
-                                result = await updateContextTool(contextManager, resolvedArgs[0], resolvedArgs[1]);
-                                break;
-                            case 'summarize_file':
-                                result = await summarizeFileTool(contextManager, resolvedArgs[0]);
-                                break;
-                            case 'test_args':
-                                result = await testArgsTool(...resolvedArgs);
-                                break;
-                            default:
-                                result = {
-                                    success: false,
-                                    error: "Unknown tool: " + tool,
-                                };
-                        }
+                    switch (tool) {
+                        case 'read_file':
+                            result = await readFileTool(resolvedArgs[0]);
+                            break;
+                        case 'write_file':
+                            result = await writeFileTool(resolvedArgs[0], resolvedArgs[1], rl);
+                            break;
+                        case 'list_directory':
+                            result = await listDirectoryTool(resolvedArgs[0], resolvedArgs[1]);
+                            break;
+                        case 'run_shell_command':
+                            result = await runShellCommandTool(resolvedArgs[0], rl);
+                            break;
+                        case 'search_file_content':
+                            result = await searchFileContentTool(resolvedArgs[0], resolvedArgs[1]);
+                            break;
+                        case 'create_directory':
+                            result = await createDirectoryTool(resolvedArgs[0]);
+                            break;
+                        case 'replace_in_file':
+                            result = await replaceInFileTool(resolvedArgs[0], resolvedArgs[1], resolvedArgs[2], resolvedArgs[3], rl);
+                            break;
+                        case 'search_and_replace_in_file':
+                            result = await searchAndReplaceInFileTool(resolvedArgs[0], resolvedArgs[1], resolvedArgs[2], rl);
+                            break;
+                        case 'get_file_metadata':
+                            result = await getFileMetadataTool(resolvedArgs[0]);
+                            break;
+                        case 'git_diff':
+                            result = await gitDiffTool(resolvedArgs[0]);
+                            break;
+                        case 'git_blame':
+                            result = await gitBlameTool(resolvedArgs[0]);
+                            break;
+                        case 'get_project_context':
+                            result = await getProjectContextTool();
+                            break;
+                        case 'get_available_tools':
+                            result = await getAvailableTools();
+                            break;
+                        case 'get_context':
+                            result = await getContextTool(contextManager);
+                            break;
+                        case 'update_context':
+                            result = await updateContextTool(contextManager, resolvedArgs[0], resolvedArgs[1]);
+                            break;
+                        case 'summarize_file':
+                            result = await summarizeFileTool(contextManager, resolvedArgs[0]);
+                            break;
+                        case 'test_args':
+                            result = await testArgsTool(...resolvedArgs);
+                            break;
+                        default:
+                            result = {
+                                success: false,
+                                error: "Unknown tool: " + tool,
+                            };
                     }
+                    spinner.stop();
 
                     if (!result.success) {
                         throw new Error(result.error);
                     }
 
                     const outputMessage = "<tool_output>" + result.output + "<\/tool_output>";
-                    console.log("--- Tool Output ---\n" + result.output + "\n-------------------");
+                    if (tool === 'get_file_metadata') {
+                        console.log(chalk.green('--- Tool Output ---'));
+                        console.table(result.output);
+                        console.log(chalk.green('-------------------'));
+                    } else {
+                        console.log(chalk.green('--- Tool Output ---\n') + chalk.blue(result.output) + chalk.green('\n-------------------'));
+                    }
                     messages.push({ role: 'tool', content: outputMessage });
                     interactionLog.tool_executions.push({
                         tool_call: tool + "(" + resolvedArgs.join(', ') + ")",
@@ -764,46 +552,7 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
 
                     stepOutput.push(result.output);
                 } catch (error) {
-                    const recoveryResult = await handleToolError(step, error.message, context, messages, rl, contextManager, planState);
-
-                    if (recoveryResult && recoveryResult.recovery) {
-                        const { strategy, ...rest } = recoveryResult.recovery;
-
-                        switch (strategy) {
-                            case 'retry':
-                                console.log("--- Retrying step ---");
-                                if (rest.args) {
-                                    step.args = rest.args;
-                                }
-                                planState.currentStepIndex--;
-                                break;
-                            case 'alternative_step':
-                                console.log("--- Using alternative step ---");
-                                planState.currentPlan.plan[planState.currentStepIndex] = rest.step;
-                                planState.currentStepIndex--;
-                                break;
-                            case 'new_plan':
-                                console.log("--- Using new plan ---");
-                                planState.currentPlan = rest.plan;
-                                planState.currentStepIndex = 0;
-                                break;
-                            case 'ask_user':
-                                console.log("--- Asking user for help ---");
-                                const answer = await new Promise((resolve) => {
-                                    rl.question("AI needs help: " + rest.question + "\nYou: ", (answer) => {
-                                        resolve(answer);
-                                    });
-                                });
-                                const prompt = "The user responded with: \"" + answer + "\". Please use this information to decide on the next step.";
-                                await processMessage(prompt, messages, rl, contextManager, planState);
-                                break;
-                            default:
-                                console.error("Unknown recovery strategy: " + strategy);
-                                throw error;
-                        }
-                    } else {
-                        throw error;
-                    }
+                    await handleError(error, messages, rl, contextManager, planState);
                 }
             }
 
@@ -826,9 +575,47 @@ async function logInteraction(interactionLog) {
     }
 }
 
+async function handleError(error, messages, rl, contextManager, planState) {
+    console.error(chalk.red('\n--- An error occurred ---'));
+    console.error(chalk.red(error.stack));
+
+    messages.push({ role: 'system', content: `An error occurred: ${error.message}` });
+
+    const answer = await new Promise((resolve) => {
+        rl.question("What would you like to do? (c)ontinue, (r)etry, (a)bort: ", (answer) => {
+            resolve(answer);
+        });
+    });
+
+    switch (answer.toLowerCase()) {
+        case 'c':
+        case 'continue':
+            return;
+        case 'r':
+        case 'retry':
+            // This will depend on where the error occurred. For now, we'll just re-run the last message.
+            const lastMessage = messages.pop();
+            await processMessage(lastMessage.content, messages, rl, contextManager, planState);
+            break;
+        case 'a':
+        case 'abort':
+            rl.close();
+            break;
+        default:
+            console.log(chalk.yellow('Invalid option. Continuing...'));
+            return;
+    }
+}
+
 async function chatWithAI(initialPrompt = null) {
 	const contextManager = new ContextManager();
 	await contextManager.load();
+
+    const projectContext = await getProjectContextTool();
+    if (projectContext.success) {
+        contextManager.update('project_context', projectContext.output);
+    }
+
 	await contextManager.save();
 
 	let messages = await loadHistory();

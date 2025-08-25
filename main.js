@@ -5,6 +5,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let messages = []; // Array to store conversation history
 
+    // Load conversation history from localStorage
+    const loadHistory = () => {
+        const storedMessages = localStorage.getItem('conversationHistory');
+        if (storedMessages) {
+            messages = JSON.parse(storedMessages);
+            messages.forEach(msg => {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('message', `${msg.role}-message`);
+                if (msg.role === 'user') {
+                    messageElement.textContent = msg.content;
+                } else {
+                    messageElement.innerHTML = marked.parse(msg.content);
+                }
+                messagesDiv.appendChild(messageElement);
+            });
+            messagesDiv.scrollTop = messagesDiv.scrollHeight; // Auto-scroll to bottom
+        }
+    };
+
+    // Save conversation history to localStorage
+    const saveHistory = () => {
+        localStorage.setItem('conversationHistory', JSON.stringify(messages));
+    };
+
+    loadHistory(); // Load history when the page loads
+
     const addMessage = (content, sender) => {
         const messageElement = document.createElement('div');
         messageElement.classList.add('message', `${sender}-message`);
@@ -27,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         addMessage(prompt, 'user');
         messages.push({ role: 'user', content: prompt }); // Add user message to history
+        saveHistory(); // Save history after user message
         promptInput.value = '';
         sendButton.disabled = true;
 
@@ -65,7 +92,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         const data = JSON.parse(line);
                         if (data.message && data.message.content) {
                             aiResponseAccumulated += data.message.content;
-                            aiMessageElement.innerHTML = marked.parse(aiResponseAccumulated); // Update with parsed markdown
+                            const toolCodeMatch = aiResponseAccumulated.match(/<tool_code>([\s\S]*?)<\/tool_code>/);
+                            const toolOutputMatch = aiResponseAccumulated.match(/<tool_output>([\s\S]*?)<\/tool_output>/);
+
+                            if (toolCodeMatch && toolOutputMatch) {
+                                const toolCode = toolCodeMatch[1].trim();
+                                const toolOutput = toolOutputMatch[1].trim();
+                                displayToolOutput(toolCode, toolOutput);
+                                aiResponseAccumulated = aiResponseAccumulated.replace(toolCodeMatch[0], '').replace(toolOutputMatch[0], '');
+                            }
+
+                            aiMessageElement.innerHTML = marked.parse(aiResponseAccumulated);
+                            hljs.highlightAll(); // Highlight code blocks
                             messagesDiv.scrollTop = messagesDiv.scrollHeight;
                         }
                     }
@@ -75,6 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             // After stream ends, add the full AI response to history
             messages.push({ role: 'assistant', content: aiResponseAccumulated });
+            saveHistory(); // Save history after AI message
 
         } catch (error) {
             console.error('Error:', error);
@@ -83,6 +122,20 @@ document.addEventListener('DOMContentLoaded', () => {
             sendButton.disabled = false;
         }
     });
+
+    const displayToolOutput = (toolCode, toolOutput) => {
+        const toolOutputElement = document.createElement('div');
+        toolOutputElement.classList.add('tool-output');
+        toolOutputElement.innerHTML = `
+            <h3>Tool Executed:</h3>
+            <pre><code class="language-javascript">${toolCode}</code></pre>
+            <h3>Tool Output:</h3>
+            <pre><code>${toolOutput}</code></pre>
+        `;
+        messagesDiv.appendChild(toolOutputElement);
+        hljs.highlightAll();
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    };
 
     promptInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {

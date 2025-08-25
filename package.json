@@ -12,9 +12,33 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "A local AI coding assistant powered by Ollama with tool use and interactive sessions.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/local-ai-coder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/local-ai-coder/issues"
+  },
+  "homepage": "https://github.com/your-username/local-ai-coder#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "cli.js",
+    "main.js",
+    "style.css",
+    "index.html",
+    "argumentParser.js",
+    "contextManager.js",
+    "tools.js",
+    "conversation_history.json",
+    "context.json"
+  ],
   "dependencies": {
+    "chalk": "^5.6.0",
     "commander": "^12.0.0",
-    "ollama": "^0.5.17"
+    "ollama": "^0.5.17",
+    "ora": "^8.2.0"
   }
 }
