@@ -3,8 +3,67 @@
 import { Command } from 'commander';
 import readline from 'readline';
 import chalk from 'chalk';
-import ora from 'ora';
+import cliSpinners from 'cli-spinners';
 import ContextManager from './contextManager.js';
+
+// Custom spinner implementation using cli-spinners
+class CustomSpinner {
+    constructor(text = 'Loading...') {
+        this.text = text;
+        this.spinner = cliSpinners.dots;
+        this.interval = null;
+        this.isSpinning = false;
+    }
+
+    start() {
+        if (this.isSpinning) return this;
+        
+        this.isSpinning = true;
+        let frameIndex = 0;
+        
+        this.interval = setInterval(() => {
+            const frame = this.spinner.frames[frameIndex];
+            process.stdout.write(`\r${frame} ${this.text}`);
+            frameIndex = (frameIndex + 1) % this.spinner.frames.length;
+        }, this.spinner.interval);
+        
+        return this;
+    }
+
+    stop() {
+        if (this.interval) {
+            clearInterval(this.interval);
+            this.interval = null;
+        }
+        this.isSpinning = false;
+        process.stdout.write('\r' + ' '.repeat(process.stdout.columns) + '\r');
+        return this;
+    }
+
+    succeed(text) {
+        this.stop();
+        console.log(`\r✓ ${text || this.text}`);
+        return this;
+    }
+
+    fail(text) {
+        this.stop();
+        console.log(`\r✗ ${text || this.text}`);
+        return this;
+    }
+
+    warn(text) {
+        this.stop();
+        console.log(`\r⚠ ${text || this.text}`);
+        return this;
+    }
+
+    info(text) {
+        this.stop();
+        console.log(`\rℹ ${text || this.text}`);
+        return this;
+    }
+}
 import ollama from 'ollama';
 import { promises as fs } from 'fs';
 import { resolveArguments } from './argumentParser.js';
@@ -28,7 +87,7 @@ import {
     testArgsTool,
 } from './tools.js';
 
-const systemMessage = `You are a helpful AI assistant that can use tools to interact with the user's system.`;
+const systemMessage = `You are a helpful AI assistant.`;;
 
 async function processMessage(userMessage, messages, rl, contextManager, planState) {
     const interactionLog = {
@@ -48,20 +107,17 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
         });
     }
 
-    const spinner = ora('Thinking...').start();
+    const spinner = new CustomSpinner('Thinking...').start();
     try {
         const response = await ollama.chat({
             model: 'codellama',
             messages: currentMessages,
-            stream: true,
+            // stream: true, // Commented out for debugging
         });
 
-        let aiResponseContent = '';
-        spinner.stop();
-        for await (const chunk of response) {
-            aiResponseContent += chunk.message.content;
-            process.stdout.write(chunk.message.content);
-        }
+        let aiResponseContent = response.message.content;
+        spinner.stop(); // Ensure spinner stops after receiving response
+        process.stdout.write(aiResponseContent); // Output the AI response
         process.stdout.write('\n');
 
         interactionLog.ai_responses.push(aiResponseContent);
@@ -95,7 +151,7 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
             if (parsedTool) {
                 console.log("\n--- Executing Tool: " + parsedTool.toolName + "(" + parsedTool.args.join(', ') + ") ---");
                 let result;
-                const spinner = ora(`Executing ${parsedTool.toolName}...`).start();
+                const spinner = new CustomSpinner(`Executing ${parsedTool.toolName}...`).start();
                 try {
                     switch (parsedTool.toolName) {
                         case 'read_file':
@@ -199,6 +255,7 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
             }
         }
     } catch (error) {
+        console.error("Error in processMessage: ", error);
         await handleError(error, messages, rl, contextManager, planState);
     }
     return interactionLog;
@@ -463,7 +520,7 @@ async function executePlanSteps(planState, context, messages, rl, contextManager
             let stepOutput = [];
             for (const item of itemsToIterate) {
                 let result;
-                const spinner = ora(`Executing ${tool}...`).start();
+                const spinner = new CustomSpinner(`Executing ${tool}...`).start();
                 try {
                     const { tool, args } = step;
                     const stepContext = { ...context };
@@ -638,8 +695,7 @@ async function chatWithAI(initialPrompt = null) {
 		const interactionLog = await processMessage(initialPrompt, messages, rl, contextManager, planState);
 		await logInteraction(interactionLog);
 		await saveHistory(messages);
-		rl.close();
-		process.exit(0);
+		rl.prompt();
 	} else {
 		console.log("\n--- Local AI Coder (Interactive Session) ---\nType 'exit' or 'quit' to end the session.\n");
 		rl.prompt();
