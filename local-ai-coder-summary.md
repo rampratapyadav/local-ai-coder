@@ -68,6 +68,7 @@ local AI coder. To recap, we now have:
         *   **Advanced Argument Resolution:** Resolves placeholders like `${item}` and `${variable_name}` in tool arguments. The new parser can handle nested objects and arrays, and resolve variables from the context.
         *   **Robust Tool Parsing:** The `parseToolCall` function in `cli.js` has been updated to reliably handle complex arguments, including quoted strings, commas, and escaped characters.
         *   **Argument Validation:** Comprehensive validation has been added to tool arguments in `cli.js` to ensure correct types and formats, improving robustness.
+        *   **Goal-Oriented Reasoning:** The agent can be assigned a high-level goal using the `--goal` flag. It will keep this goal in its context and use it to guide its planning and error recovery.
 
 4.  **Fine-Tuning Pipeline:**
     *   **Data Formatting:** `data_formatter.py` script to transform `agent_interactions.jsonl` into a format suitable for fine-tuning.
@@ -82,9 +83,7 @@ local AI coder. To recap, we now have:
 
 ### Core Agent Capabilities
 
-
-
-*   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
+*   **Deeper Reasoning:** The agent could still benefit from more advanced reasoning capabilities, such as learning from past plan failures and resource awareness.
 *   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
 
 ### Tooling and Robustness

@@ -87,7 +87,11 @@ import {
     testArgsTool,
 } from './tools.js';
 
-const systemMessage = `You are a helpful AI assistant.`;;
+const systemMessage = `You are a helpful AI assistant. Your primary objective is to achieve the user's stated goal.
+
+You have a context object available to you, which may contain a 'current_goal'. You must always prioritize actions and plans that work towards this goal.
+
+When formulating a plan, each step should be a logical progression towards the goal. If you encounter an error, your recovery strategy should also be aligned with achieving the original goal.`;
 
 async function processMessage(userMessage, messages, rl, contextManager, planState) {
     const interactionLog = {
@@ -466,6 +470,7 @@ async function handleToolError(failedStep, error, context, messages, rl, context
                      "The current context is:\n" + JSON.stringify(context, null, 2) + "\n\n" +
                      "The current plan was:\n" + JSON.stringify(planState.currentPlan, null, 2) + "\n\n" +
                      "The current step index was: " + planState.currentStepIndex + "\n\n" +
+                     "Remember, the overall goal is: " + context.current_goal + "\n\n" +
                      "Please choose a strategy to recover from this error. Your response should be a JSON object inside a <recovery> block with one of the following structures:\n\n" +
                      "1.  **Retry the step (with optional modifications):**\n" +
                      "    { \"strategy\": \"retry\", \"args\": [...] }\n\n" +
@@ -668,9 +673,17 @@ async function handleError(error, messages, rl, contextManager, planState) {
     }
 }
 
-async function chatWithAI(initialPrompt = null) {
+async function chatWithAI(initialPrompt = null, goal = null) {
 	const contextManager = new ContextManager();
 	await contextManager.load();
+
+    if (goal) {
+        contextManager.update('current_goal', goal);
+        console.log(chalk.green(`Goal set: ${goal}`));
+        if (!initialPrompt) {
+            initialPrompt = `My goal is: "${goal}". Please create a plan to achieve this goal using the available tools. Your response must be a JSON object inside a <plan> block.`;
+        }
+    }
 
     const projectContext = await getProjectContextTool();
     if (projectContext.success) {
@@ -723,9 +736,12 @@ async function chatWithAI(initialPrompt = null) {
 	});
 }
 
-program.arguments('[prompt...]').action(async (promptArgs) => {
-	const initialPrompt = promptArgs && promptArgs.length > 0 ? promptArgs.join(' ') : null;
-	chatWithAI(initialPrompt);
-});
+program
+    .option('-g, --goal <goal>', 'Set the goal for the AI agent')
+    .arguments('[prompt...]')
+    .action(async (promptArgs, options) => {
+        const initialPrompt = promptArgs && promptArgs.length > 0 ? promptArgs.join(' ') : null;
+        await chatWithAI(initialPrompt, options.goal);
+    });
 
 program.parse(process.argv);

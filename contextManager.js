@@ -15,6 +15,7 @@ class ContextManager {
 			if (error.code === 'ENOENT') {
 				// If the file doesn't exist, initialize with an empty context
 				this.context = {
+					current_goal: '',
 					project_summary: '',
 					file_summaries: {},
 					tool_history: [],
@@ -45,6 +46,7 @@ class ContextManager {
 
 	clear() {
 		this.context = {
+			current_goal: '',
 			project_summary: '',
 			file_summaries: {},
 			tool_history: [],

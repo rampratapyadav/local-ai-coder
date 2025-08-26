@@ -56,13 +56,17 @@ A component within `cli.js` acts as the plan execution engine, responsible for:
 *   **Merge and Export Script:** `merge_and_export.py` script to merge the trained LoRA adapters with the base model.
 *   **Deployment Instructions:** The process for converting the model to GGUF and running it in Ollama is documented.
 
+### 9. Goal-Oriented Reasoning
+*   **Implemented:** The agent now has a concept of a high-level goal.
+    *   A `--goal` flag has been added to the CLI to set a `current_goal` in the agent's context at the start of a session.
+    *   The system prompt has been updated to instruct the AI to always work towards the `current_goal`.
+    *   The error handling mechanism (`handleToolError`) has been updated to remind the AI of the goal when a tool fails, encouraging more resilient and goal-oriented recovery plans.
+
 ## Pending/Future Scope:
 
 ### Core Agent Capabilities
 
-
-
-*   **Deeper Reasoning:** The agent lacks a deeper understanding of its goals. Features like goal-oriented reasoning, learning from past plan failures, and resource awareness are still pending.
+*   **Deeper Reasoning:** The agent could still benefit from more advanced reasoning capabilities, such as learning from past plan failures and resource awareness.
 *   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
 
 ### Tooling and Robustness
