@@ -167,7 +167,7 @@ export async function replaceInFileTool(filePath, oldString, newString, replaceA
         }
         await new Promise((resolve, reject) => {
             rl.question(
-                `Are you sure you want to replace ${replaceAll ? 'all occurrences of ' : ''}"${oldString}" with "${newString}" in ${filePath}? (y/n): `,
+                `Are you sure you want to replace ${replaceAll ? 'all occurrences of ' : ''}\"${oldString}\" with \"${newString}\" in ${filePath}? (y/n): `,
                 (answer) => {
                     if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
                         resolve();
@@ -179,7 +179,7 @@ export async function replaceInFileTool(filePath, oldString, newString, replaceA
         });
         const updatedContent = replaceAll ? fileContent.replace(new RegExp(oldString, 'g'), newString) : fileContent.replace(oldString, newString);
         await fs.writeFile(filePath, updatedContent, 'utf8');
-        return { success: true, output: `Successfully replaced ${replaceAll ? 'all occurrences of ' : ''}"${oldString}" with "${newString}" in ${filePath}.` };
+        return { success: true, output: `Successfully replaced ${replaceAll ? 'all occurrences of ' : ''}\"${oldString}\" with \"${newString}\" in ${filePath}.` };
     } catch (error) {
         return {
             success: false,
@@ -209,7 +209,7 @@ export async function searchAndReplaceInFileTool(filePath, searchRegex, replaceS
         }
         await new Promise((resolve, reject) => {
             rl.question(
-                `Are you sure you want to replace all occurrences of "${searchRegex}" with "${replaceStr}" in ${filePath}? (y/n): `,
+                `Are you sure you want to replace all occurrences of \"${searchRegex}\" with \"${replaceStr}\" in ${filePath}? (y/n): `,
                 (answer) => {
                     if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
                         resolve();
@@ -221,7 +221,7 @@ export async function searchAndReplaceInFileTool(filePath, searchRegex, replaceS
         });
         const updatedContent = fileContent.replace(regex, replaceStr);
         await fs.writeFile(filePath, updatedContent, 'utf8');
-        return { success: true, output: `Successfully replaced all occurrences of "${searchRegex}" with "${replaceStr}" in ${filePath}.` };
+        return { success: true, output: `Successfully replaced all occurrences of \"${searchRegex}\" with \"${replaceStr}\" in ${filePath}.` };
     } catch (error) {
         return {
             success: false,
@@ -397,4 +397,44 @@ export async function testArgsTool(...args) {
     console.log('--- test_args tool called with: ---');
     console.log(args);
     return { success: true, output: JSON.stringify(args, null, 2) };
+}
+
+export async function getPastFailuresTool(searchQuery) {
+    if (typeof searchQuery !== 'string') {
+        return { success: false, error: 'Validation Error: searchQuery must be a string.' };
+    }
+    try {
+        const logContent = await fs.readFile('failure_log.jsonl', 'utf8');
+        const failures = logContent.trim().split('\n').map(line => JSON.parse(line));
+        
+        const lowerCaseQuery = searchQuery.toLowerCase();
+        
+        const relevantFailures = failures.filter(failure => {
+            const goalMatch = failure.goal && failure.goal.toLowerCase().includes(lowerCaseQuery);
+            const descriptionMatch = failure.failedStep && failure.failedStep.description && failure.failedStep.description.toLowerCase().includes(lowerCaseQuery);
+            const errorMatch = failure.error && failure.error.toLowerCase().includes(lowerCaseQuery);
+            
+            return goalMatch || descriptionMatch || errorMatch;
+        });
+        
+        if (relevantFailures.length === 0) {
+            return { success: true, output: 'No relevant past failures found.' };
+        }
+        
+        const summary = relevantFailures.map(failure => {
+            return {
+                timestamp: failure.timestamp,
+                goal: failure.goal,
+                failedStep: failure.failedStep.description,
+                error: failure.error,
+            };
+        });
+        
+        return { success: true, output: JSON.stringify(summary, null, 2) };
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            return { success: true, output: 'No past failures have been logged yet.' };
+        }
+        return { success: false, error: `Error reading failure log: ${error.message}` };
+    }
 }

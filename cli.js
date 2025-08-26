@@ -91,7 +91,9 @@ const systemMessage = `You are a helpful AI assistant. Your primary objective is
 
 You have a context object available to you, which may contain a 'current_goal'. You must always prioritize actions and plans that work towards this goal.
 
-When formulating a plan, each step should be a logical progression towards the goal. If you encounter an error, your recovery strategy should also be aligned with achieving the original goal.`;
+Before formulating a new plan, you should consider consulting past failures to avoid repeating mistakes. You can do this by using the 'get_past_failures' tool with a relevant search query.
+
+When formulating a plan, each step should be a logical progression towards the goal. If you encounter an error, your recovery strategy should also be aligned with achieving the original goal.`
 
 async function processMessage(userMessage, messages, rl, contextManager, planState) {
     const interactionLog = {
@@ -212,6 +214,9 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
                             break;
                         case 'test_args':
                             result = await testArgsTool(...parsedTool.args);
+                            break;
+                        case 'get_past_failures':
+                            result = await getPastFailuresTool(parsedTool.args[0]);
                             break;
                         default:
                             result = { success: false, error: "Unknown tool: " + parsedTool.toolName };
@@ -460,6 +465,22 @@ function validatePlan(plan) {
 async function handleToolError(failedStep, error, context, messages, rl, contextManager, planState) {
     console.error("\n--- Tool Error: Step " + failedStep.step + " failed ---");
     console.error("Error: " + error);
+
+    // Log the failure
+    const failureData = {
+        timestamp: new Date().toISOString(),
+        goal: context.current_goal,
+        failedStep: failedStep,
+        error: error.toString(),
+        plan: planState.currentPlan,
+    };
+    try {
+        await fs.appendFile('failure_log.jsonl', JSON.stringify(failureData) + '\n');
+        console.log("--- Failure logged to failure_log.jsonl ---");
+    } catch (logError) {
+        console.error("Error logging failure:", logError);
+    }
+
 
     const newPrompt = "The following step in the plan failed:\n" +
                      "- Step: " + failedStep.step + "\n" +

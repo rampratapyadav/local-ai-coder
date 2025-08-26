@@ -14,20 +14,7 @@ local AI coder. To recap, we now have:
 
   This is a solid foundation for your "self-learning blackbox AI agent."
 
-  What would you like to focus on next? Here are some possibilities:
-
-
-   * Enhance Tool Use: Make the tool parsing more robust, add more specific tools (e.g.,
-     searching file content, creating directories, replacing text in files).
-   * "Self-Learning" Implementation: Discuss how to collect interaction data from your
-     sessions to fine-tune the codellama model for your specific needs and coding style.
-     (This is an advanced topic requiring more resources).
-   * Project Context Awareness: How can the AI automatically understand your project's
-     structure, dependencies, and existing code to provide more relevant assistance?
-   * Error Handling & Robustness: Improve the stability and error reporting of both the CLI
-     and web GUI.
-   * Packaging & Distribution: Explore options for making your local-ai-coder CLI easier to
-     install and distribute.
+  Our current focus is on **Fine-Tuning** the model to make the agent truly functional.
 
 ---
 
@@ -52,52 +39,32 @@ local AI coder. To recap, we now have:
     *   **Conversation History Persistence:** Saves and loads history across sessions (`conversation_history.json`).
     *   **Agentic Tool Use:**
         *   AI can call specific tools defined in `cli.js`.
-        *   Tools implemented (with user confirmation for destructive actions like `write_file`, `run_shell_command`, `replace_in_file`):
-            *   `read_file(filePath)`
-            *   `write_file(filePath, content)`
-            *   `list_directory(dirPath)`
-            *   `run_shell_command(command)`
-            *   `search_file_content(filePath, pattern)`
-            *   `create_directory(dirPath)`
-            *   `replace_in_file(filePath, oldString, newString)`
+        *   Tools implemented: `read_file`, `write_file`, `list_directory`, `run_shell_command`, `search_file_content`, `create_directory`, `replace_in_file`.
         *   Tool output is fed back to the AI.
-    *   **Data Collection for Fine-tuning:** Logs all interactions (user prompt, AI response, tool calls/outputs) to `agent_interactions.jsonl`.
-    *   **Advanced Agentic Features (Partial Implementation):**
-        *   **Structured Planning:** Parses and executes AI-generated JSON plans within `<plan>` blocks.
-        *   **Plan Execution Engine:** Iterates through plan steps, executes tools, supports `output_variable` for context, and `iterate_on` for processing lists.
-        *   **Advanced Argument Resolution:** Resolves placeholders like `${item}` and `${variable_name}` in tool arguments. The new parser can handle nested objects and arrays, and resolve variables from the context.
-        *   **Robust Tool Parsing:** The `parseToolCall` function in `cli.js` has been updated to reliably handle complex arguments, including quoted strings, commas, and escaped characters.
-        *   **Argument Validation:** Comprehensive validation has been added to tool arguments in `cli.js` to ensure correct types and formats, improving robustness.
-        *   **Goal-Oriented Reasoning:** The agent can be assigned a high-level goal using the `--goal` flag. It will keep this goal in its context and use it to guide its planning and error recovery.
+    *   **Data Collection for Fine-tuning:** Logs all interactions to `agent_interactions.jsonl`.
+    *   **Advanced Agentic Features:**
+        *   **Structured Planning:** Parses and executes AI-generated JSON plans.
+        *   **Plan Execution Engine:** Iterates through plan steps, executes tools, and manages context.
+        *   **Advanced Argument Resolution:** Resolves variables in tool arguments.
+        *   **Robust Tool Parsing & Argument Validation.**
+        *   **Goal-Oriented Reasoning:** The agent uses a high-level goal to guide its planning and error recovery.
 
-4.  **Fine-Tuning Pipeline:**
-    *   **Data Formatting:** `data_formatter.py` script to transform `agent_interactions.jsonl` into a format suitable for fine-tuning.
-    *   **Fine-Tuning Script:** `fine_tune_model.py` script to fine-tune the `codellama` model using LoRA.
-    *   **Merge and Export Script:** `merge_and_export.py` script to merge the trained LoRA adapters with the base model.
-    *   **Deployment Instructions:** The process for converting the model to GGUF and running it in Ollama is documented.
+4.  **Fine-Tuning Pipeline (Ready for Implementation):**
+    *   **Data Formatting:** `data_formatter.py` script.
+    *   **Fine-Tuning Script:** `fine_tune_model.py` script.
+    *   **Merge and Export Script:** `merge_and_export.py` script.
+    *   **Deployment Instructions.**
 
 5.  **Advanced Self-Correction:**
-    *   When a tool fails, the agent can now choose between several recovery strategies: retrying the step (with or without modified arguments), proposing an alternative step, creating a new plan, or asking the user for help.
+    *   The agent has recovery strategies for tool failures.
 
-### Pending/Future Scope:
+### Next Step: Fine-Tuning (Top Priority)
 
-### Core Agent Capabilities
+*   **Fine-Tuning Implementation:** Execute the actual fine-tuning of the `codellama` model.
 
-*   **Deeper Reasoning:** The agent could still benefit from more advanced reasoning capabilities, such as learning from past plan failures and resource awareness.
-*   **Proactive Context Management:** The agent currently relies on tools like `get_project_context` to be explicitly called. A more advanced, proactive system where the agent automatically understands the project context is a future goal.
+### Future Scope (Lower Priority)
 
-### Tooling and Robustness
-
-
-*   **Comprehensive Error Handling:** The main `processMessage` loop could have more robust error handling for AI interaction and tool execution failures.
-
-
-### User Experience
-
-*   **Web GUI Enhancements:** The web interface is still missing several key features, including cross-session conversation history, code highlighting for rendered markdown, and a more effective way to display tool outputs.
-*   **CLI Enhancements:** The command-line interface could be improved with better formatting for tool outputs and progress indicators for long-running commands.
-
-### Packaging and Distribution
-
-*   The project is not yet set up for easy distribution. This includes creating a proper npm package for the CLI and considering a standalone executable.
-
+*   **Core Agent Capabilities:** Continue to enhance the agent's reasoning.
+*   **Tooling and Robustness:** Re-evaluate Git tools and improve error handling.
+*   **User Experience:** Further enhance the Web GUI and CLI.
+*   **Packaging and Distribution:** Consider a standalone executable.
