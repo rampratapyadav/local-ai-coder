@@ -112,12 +112,16 @@ async function processMessage(userMessage, messages, rl, contextManager, planSta
         const response = await ollama.chat({
             model: 'codellama',
             messages: currentMessages,
-            // stream: true, // Commented out for debugging
+            stream: true,
         });
 
-        let aiResponseContent = response.message.content;
-        spinner.stop(); // Ensure spinner stops after receiving response
-        process.stdout.write(aiResponseContent); // Output the AI response
+        let aiResponseContent = '';
+        spinner.stop(); // Stop spinner before streaming output
+        for await (const chunk of response) {
+            const content = chunk.message.content;
+            aiResponseContent += content;
+            process.stdout.write(content);
+        }
         process.stdout.write('\n');
 
         interactionLog.ai_responses.push(aiResponseContent);
